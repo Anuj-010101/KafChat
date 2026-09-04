@@ -1,0 +1,20 @@
+[
+  {
+    "title": "Lo-Fi Chill",
+    "artist": "AudioLibrary",
+    "audioUrl": "https://cdn.pixabay.com/download/audio/2022/05/27/audio_1808fbf756.mp3?filename=lofi-study-112191.mp3",
+    "duration": 30
+  },
+  {
+    "title": "Summer Upbeat",
+    "artist": "Pixabay",
+    "audioUrl": "https://cdn.pixabay.com/download/audio/2022/03/15/audio_c8c3a50462.mp3?filename=corporate-upbeat-105151.mp3",
+    "duration": 30
+  },
+  {
+    "title": "Happy Acoustic",
+    "artist": "FMA",
+    "audioUrl": "https://cdn.pixabay.com/download/audio/2022/01/18/audio_d0a13f69d2.mp3?filename=happy-acoustic-guitar-10023.mp3",
+    "duration": 30
+  }
+]

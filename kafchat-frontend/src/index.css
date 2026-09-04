@@ -1,0 +1,130 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&family=Playfair+Display:wght@600;700&family=Poppins:wght@400;500;600;700&family=Roboto:wght@400;500;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ========================================================
+   LIGHT THEME VARIABLES (Deep Black Text on Crisp Canvas)
+   ======================================================== */
+:root, [data-theme="light"], .light {
+  --app-font: 'Inter', sans-serif;
+  --app-text: #0f172a;               /* Crisp Deep Black */
+  --app-text-muted: #64748b;         /* Slate Grey */
+  --app-accent: #0284c7;
+  --app-bg: #f8fafc;
+  --app-panel-bg: #ffffff;
+  --app-soft-bg: #f1f5f9;
+  --app-border: #e2e8f0;
+  color-scheme: light;
+}
+
+/* ========================================================
+   DARK THEME VARIABLES (Bright White Text on Pure Dark)
+   ======================================================== */
+[data-theme="dark"], .dark {
+  --app-font: 'Inter', sans-serif;
+  --app-text: #ffffff;               /* Pure Crisp White */
+  --app-text-muted: #94a3b8;         /* Light Silver / Grey */
+  --app-accent: #38bdf8;
+  --app-bg: #0b0e14;
+  --app-panel-bg: #12151c;
+  --app-soft-bg: #1a1e29;
+  --app-border: #242936;
+  color-scheme: dark;
+}
+
+* {
+  border-color: var(--app-border);
+}
+
+body {
+  margin: 0;
+  font-family: var(--app-font) !important;
+  color: var(--app-text) !important;
+  background-color: var(--app-bg) !important;
+  background-image: var(--app-bg-image, none) !important;
+  background-size: cover !important;
+  background-position: center !important;
+  background-attachment: fixed !important;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* Input, Textarea & Select Defaults */
+input, textarea, select {
+  color: var(--app-text) !important;
+}
+
+input::placeholder, textarea::placeholder {
+  color: var(--app-text-muted) !important;
+}
+
+/* Base Theme Color Classes */
+.theme-app-bg {
+  background-color: var(--app-bg) !important;
+  background-image: var(--app-bg-image, none) !important;
+  background-size: cover !important;
+  background-position: center !important;
+}
+
+.theme-panel-bg {
+  background-color: var(--app-panel-bg) !important;
+}
+
+.theme-soft-bg {
+  background-color: var(--app-soft-bg) !important;
+}
+
+.theme-text {
+  color: var(--app-text) !important;
+}
+
+.theme-text-muted {
+  color: var(--app-text-muted) !important;
+}
+
+.theme-border {
+  border-color: var(--app-border) !important;
+}
+
+/* Dynamic Accent Colors */
+.theme-accent-bg {
+  background-color: var(--app-accent) !important;
+  color: #ffffff !important;
+}
+
+.theme-accent-bg:hover {
+  filter: brightness(1.1);
+}
+
+.theme-accent-text {
+  color: var(--app-accent) !important;
+}
+
+.theme-accent-border {
+  border-color: var(--app-accent) !important;
+}
+
+.theme-accent-tint {
+  background-color: color-mix(in srgb, var(--app-accent) 15%, transparent) !important;
+  color: var(--app-accent) !important;
+}
+
+.theme-accent-focus:focus,
+.theme-accent-focus:focus-within {
+  border-color: var(--app-accent) !important;
+  box-shadow: 0 0 0 1px var(--app-accent);
+}
+
+/* Scrollbar */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: var(--app-border);
+  border-radius: 999px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
