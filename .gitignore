@@ -1,0 +1,13 @@
+# Ignore node modules in root and subfolders
+node_modules/
+**/node_modules/
+
+# Ignore environment config files
+.env
+.env.local
+.env.*.local
+
+# System & Editor files
+.DS_Store
+.vscode/
+.idea/
