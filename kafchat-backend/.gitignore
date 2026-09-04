@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Environment variables (Database URLs & Secrets)
+.env
+.env.local
+
+# Uploads or temporary runtime files
+uploads/
+temp/
+
+# Logs
+logs/
+*.log
+
+# Editor/IDE files
+.DS_Store
+.vscode/
+.idea/
