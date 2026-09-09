@@ -18,6 +18,7 @@ import Avatar from "../common/Avatar";
 import { useChat } from "../../hooks/useChat";
 import { useAuth } from "../../hooks/useAuth";
 import { useCall } from "../../hooks/useCall";
+import { getSocket } from "../../services/socket";
 import api from "../../services/api";
 import toast from "react-hot-toast";
 
@@ -41,7 +42,7 @@ const ChatWindow = () => {
   const [showInfoDrawer, setShowInfoDrawer] = useState(false);
   const messagesEndRef = useRef(null);
   const currentUserId = (user?._id || user?.id)?.toString();
-  const isVip = Boolean(user?.isVIP);
+  const isVip = Boolean(user?.isVIP || user?.isVip);
 
   const [currentWallpaper, setCurrentWallpaper] = useState("");
   const [streakData, setStreakData] = useState(null);
@@ -54,6 +55,71 @@ const ChatWindow = () => {
     (p) => (p?._id || p)?.toString() !== currentUserId
   );
   const otherUserId = (otherParticipant?._id || otherParticipant)?.toString();
+
+  // 🔌 Auto join chat room on active chat change
+  useEffect(() => {
+    const activeSocket = window.socket || getSocket();
+    if (activeSocket && activeChat?._id) {
+      activeSocket.emit("join_chat", activeChat._id);
+    }
+  }, [activeChat?._id]);
+
+  // 📸 PRO/VIP SNAPCHAT SCREENSHOT & RECORDING LISTENER
+  useEffect(() => {
+    const activeSocket = window.socket || getSocket();
+    if (!activeSocket) return;
+
+    const handleScreenshotAlert = (data) => {
+      // Agar current user VIP/Pro hai aur event kisi doosre user ne trigger kiya hai
+      if (data?.alertText && data.senderId !== currentUserId && isVip) {
+        toast(data.alertText, {
+          icon: '🚨',
+          duration: 5000,
+          style: {
+            background: '#121212',
+            color: '#ff4b4b',
+            border: '1px solid rgba(255, 75, 75, 0.4)',
+            fontSize: '12px',
+            fontWeight: 'bold',
+          },
+        });
+      }
+    };
+
+    activeSocket.on("screenshot_alert", handleScreenshotAlert);
+
+    // Keyboard shortcut (PrintScreen)
+    const handleKeyDown = (e) => {
+      if (e.key === "PrintScreen" || (e.ctrlKey && e.shiftKey && e.key === "S")) {
+        if (activeChat?._id) {
+          activeSocket.emit("screenshot_taken", {
+            chatId: activeChat._id,
+            username: user?.username,
+            captureType: "screenshot",
+          });
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      activeSocket.off("screenshot_alert", handleScreenshotAlert);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [activeChat?._id, user?.username, isVip, currentUserId]);
+
+  // 🛠️ TESTING UTILITY: Double click on Chat Header to simulate screenshot event
+  const handleSimulateScreenshot = () => {
+    const activeSocket = window.socket || getSocket();
+    if (activeSocket && activeChat?._id) {
+      toast("📸 Simulating Screenshot...", { icon: '⚙️', style: { fontSize: '10px' } });
+      activeSocket.emit("screenshot_taken", {
+        chatId: activeChat._id,
+        username: user?.username,
+        captureType: "screenshot",
+      });
+    }
+  };
 
   const fetchStreak = async () => {
     if (!activeChat || activeChat.isGroupChat || !otherUserId) return;
@@ -103,7 +169,6 @@ const ChatWindow = () => {
     return () => window.removeEventListener("wallpaper_updated", handleWallpaperChange);
   }, [activeChat?._id]);
 
-  // Click on story reaction/reply bubble to open active story directly
   useEffect(() => {
     const handleOpenStoryContext = async (e) => {
       const { storyId } = e.detail || {};
@@ -128,7 +193,6 @@ const ChatWindow = () => {
     return () => window.removeEventListener("open_story_context", handleOpenStoryContext);
   }, []);
 
-  // Listen to reshare event triggered from story mention in chat (Dono events handle kar raha hai)
   useEffect(() => {
     const handleReshareTrigger = (e) => {
       const payload = e.detail?.storyContext || e.detail;
@@ -183,8 +247,11 @@ const ChatWindow = () => {
 
   return (
     <div className="flex-1 flex flex-col h-[100dvh] max-h-[100dvh] w-full min-w-0 theme-chat-bg relative select-none overflow-hidden">
-      {/* Top Header: STICKY ON MOBILE - Kisi bhi scroll me gayab nahi hoga */}
-      <div className="sticky top-0 z-30 w-full shrink-0 shadow-md">
+      {/* Top Header */}
+      <div 
+        className="sticky top-0 z-30 w-full shrink-0 shadow-md cursor-default"
+        onDoubleClick={handleSimulateScreenshot}
+      >
         <ChatHeader onOpenInfo={() => setShowInfoDrawer(true)} onStartCall={startCall} />
 
         {/* Snap Streak Top Bar */}
@@ -243,7 +310,7 @@ const ChatWindow = () => {
         )}
       </div>
 
-      {/* Message List: Sirf ye container scroll hoga */}
+      {/* Message List */}
       <div
         className="flex-1 overflow-y-auto p-3 sm:p-4 scrollbar-thin relative transition-all duration-300 min-h-0"
         style={wallpaperStyle}
@@ -348,7 +415,7 @@ const ChatWindow = () => {
         />
       )}
 
-      {/* Direct Story Reshare Modal (Opens user's story studio with snapshot) */}
+      {/* Direct Story Reshare Modal */}
       {reshareDataForModal && (
         <CreateStatusModal
           initialReshareData={reshareDataForModal}

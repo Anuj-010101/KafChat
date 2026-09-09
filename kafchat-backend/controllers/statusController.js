@@ -7,7 +7,7 @@ const { processFileUpload, deleteFileFromStorage } = require("../services/storag
 exports.createStatus = async (req, res) => {
   try {
     const isVIP = req.user.isVIP;
-    let mediaUrl = req.body.mediaUrl;
+    let mediaUrl = req.body.mediaUrl || "";
     let mediaType = req.body.mediaType || "image";
 
     if (req.file) {
@@ -29,21 +29,24 @@ exports.createStatus = async (req, res) => {
       privacy = "everyone",
       duration = 10,
       isReshare = false,
+      reshareSnapshot = null,
       originalAuthor = null,
     } = req.body;
 
     const parsedStickers = typeof stickers === "string" ? JSON.parse(stickers) : (stickers || []);
+    const parsedReshareSnapshot = typeof reshareSnapshot === "string" ? JSON.parse(reshareSnapshot) : reshareSnapshot;
+    const parsedAttachedSong = typeof attachedSong === "string" ? JSON.parse(attachedSong) : attachedSong;
 
     const maxDurationLimit = isVIP ? 60 : 30;
     let finalDuration = Number(duration) || 10;
     if (finalDuration > maxDurationLimit) finalDuration = maxDurationLimit;
 
     let songData = {};
-    if (attachedSong && typeof attachedSong === "object") {
+    if (parsedAttachedSong && typeof parsedAttachedSong === "object") {
       songData = {
-        title: attachedSong.title || "",
-        artist: attachedSong.artist || "",
-        audioUrl: attachedSong.audioUrl || "",
+        title: parsedAttachedSong.title || "",
+        artist: parsedAttachedSong.artist || "",
+        audioUrl: parsedAttachedSong.audioUrl || "",
       };
     } else if (audioTitle) {
       songData = { title: audioTitle, artist: "", audioUrl: "" };
@@ -60,6 +63,7 @@ exports.createStatus = async (req, res) => {
       fontFamily,
       hasTextHighlight: Boolean(hasTextHighlight),
       isReshare: Boolean(isReshare),
+      reshareSnapshot: parsedReshareSnapshot || null,
       originalAuthor: originalAuthor || null,
       stickers: parsedStickers,
       attachedSong: songData,
@@ -71,7 +75,6 @@ exports.createStatus = async (req, res) => {
       "fullName username avatar profilePhotos avatarBitmojiFallback isVIP isGhostModeActive"
     );
 
-    // Auto-detect mentions and dispatch rich chat card with reshare trigger
     const mentionStickers = parsedStickers.filter((s) => s.type === "mention");
     for (const st of mentionStickers) {
       const rawUsername = st.value.replace(/^@/, "").trim().toLowerCase();

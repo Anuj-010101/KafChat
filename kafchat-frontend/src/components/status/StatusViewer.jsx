@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import {
   FiX,
   FiChevronLeft,
@@ -36,7 +36,7 @@ const StatusViewer = ({ group, onClose, onReshareStory }) => {
 
   const statuses = group?.statuses || [];
 
-  const initialUnseenIndex = () => {
+  const initialUnseenIndex = useMemo(() => {
     if (!statuses || statuses.length === 0) return 0;
     const firstUnseen = statuses.findIndex(
       (s) =>
@@ -45,7 +45,7 @@ const StatusViewer = ({ group, onClose, onReshareStory }) => {
         )
     );
     return firstUnseen !== -1 ? firstUnseen : 0;
-  };
+  }, [statuses, currentUserId]);
 
   const [index, setIndex] = useState(initialUnseenIndex);
   const [progress, setProgress] = useState(0);
@@ -55,7 +55,6 @@ const StatusViewer = ({ group, onClose, onReshareStory }) => {
   const [isPaused, setIsPaused] = useState(false);
   const [showReshareAuthorBadge, setShowReshareAuthorBadge] = useState(false);
 
-  // Full Instagram User Profile Sheet
   const [selectedUsernameForProfile, setSelectedUsernameForProfile] = useState(null);
 
   const viewedStatusesRef = useRef(new Set());
@@ -69,14 +68,12 @@ const StatusViewer = ({ group, onClose, onReshareStory }) => {
     current?.user?.username ||
     current?.user?.fullName?.toLowerCase()?.replace(/\s+/g, "");
 
-  // Check if User 2 is mentioned
   const isMentionedInCurrentStory = current?.stickers?.some((st) => {
     if (st.type !== "mention") return false;
     const cleanTag = st.value?.replace(/^@+/, "")?.toLowerCase()?.trim();
     return cleanTag && cleanTag === currentUsername;
   });
 
-  // Extract all mentioned usernames for User 3
   const mentionedUsernames = (current?.stickers || [])
     .filter((s) => s.type === "mention")
     .map((s) => s.value?.replace(/^@+/, "")?.trim())
@@ -175,7 +172,6 @@ const StatusViewer = ({ group, onClose, onReshareStory }) => {
     }
   };
 
-  // Opens User 2's Creation Studio (Does NOT post immediately to DB)
   const handleOpenStudioForReshare = (e) => {
     e.stopPropagation();
     const resharePayload = {
@@ -205,6 +201,12 @@ const StatusViewer = ({ group, onClose, onReshareStory }) => {
   };
 
   if (!current) return null;
+
+  const resolveMediaUrl = (url) => {
+    if (!url) return "";
+    if (url.startsWith("http") || url.startsWith("blob:") || url.startsWith("data:")) return url;
+    return `http://${window.location.hostname}:5000${url.startsWith("/") ? "" : "/"}${url}`;
+  };
 
   return (
     <div className="fixed inset-0 z-50 bg-black flex items-center justify-center select-none">
@@ -317,7 +319,7 @@ const StatusViewer = ({ group, onClose, onReshareStory }) => {
 
         {/* Canvas Area */}
         <div
-          className="w-full h-full flex flex-col items-center justify-center p-6 text-center overflow-hidden relative"
+          className="w-full h-full flex flex-col items-center justify-center p-0 text-center overflow-hidden relative"
           style={{
             backgroundColor:
               current.mediaType === "text"
@@ -325,7 +327,6 @@ const StatusViewer = ({ group, onClose, onReshareStory }) => {
                 : "#000000",
           }}
         >
-          {/* USER 1 RESHARED CARD */}
           {current.isReshare && current.reshareSnapshot ? (
             <div
               onClick={(e) => {
@@ -370,13 +371,13 @@ const StatusViewer = ({ group, onClose, onReshareStory }) => {
                   >
                     "{current.reshareSnapshot.text}"
                   </p>
-                ) : (
+                ) : current.reshareSnapshot.mediaUrl ? (
                   <img
-                    src={current.reshareSnapshot.mediaUrl}
+                    src={resolveMediaUrl(current.reshareSnapshot.mediaUrl)}
                     alt="Original"
                     className="w-full h-full object-cover max-h-[240px]"
                   />
-                )}
+                ) : null}
               </div>
 
               {showReshareAuthorBadge && (
@@ -419,12 +420,16 @@ const StatusViewer = ({ group, onClose, onReshareStory }) => {
               {current.text}
             </p>
           ) : (
-            <div className="flex flex-col items-center justify-center w-full h-full relative">
-              <img
-                src={current.mediaUrl}
-                alt="Story"
-                className="max-h-[80vh] max-w-full object-contain rounded-2xl"
-              />
+            <div className="flex flex-col items-center justify-center w-full h-full relative bg-black">
+              {current.mediaUrl ? (
+                <img
+                  src={resolveMediaUrl(current.mediaUrl)}
+                  alt="Story"
+                  className="w-full h-full object-contain"
+                />
+              ) : (
+                <div className="text-white/50 text-xs">No media found</div>
+              )}
               {current.text && (
                 <div className="absolute bottom-20 inset-x-4 p-3 rounded-2xl bg-black/60 backdrop-blur-md border border-white/20 text-xs font-semibold text-white">
                   {current.text}
@@ -433,7 +438,6 @@ const StatusViewer = ({ group, onClose, onReshareStory }) => {
             </div>
           )}
 
-          {/* User 2 Overlay Text */}
           {current.isReshare && current.overlayText && (
             <div className="absolute bottom-16 inset-x-4 z-20 pointer-events-none">
               <p
@@ -450,7 +454,6 @@ const StatusViewer = ({ group, onClose, onReshareStory }) => {
             </div>
           )}
 
-          {/* Interactive Stickers Overlay */}
           {current.stickers && current.stickers.length > 0 && (
             <div className="absolute inset-0 pointer-events-none z-20">
               {current.stickers.map((st, i) => (
@@ -480,7 +483,6 @@ const StatusViewer = ({ group, onClose, onReshareStory }) => {
             </div>
           )}
 
-          {/* Add to Your Story Button (For User 2) */}
           {isMentionedInCurrentStory && !isOwn && (
             <button
               type="button"
@@ -492,7 +494,6 @@ const StatusViewer = ({ group, onClose, onReshareStory }) => {
             </button>
           )}
 
-          {/* User 3 Mention Indicators */}
           {!isMentionedInCurrentStory &&
             !isOwn &&
             mentionedUsernames.length > 0 && (
@@ -648,7 +649,6 @@ const StatusViewer = ({ group, onClose, onReshareStory }) => {
           </div>
         )}
 
-        {/* Navigation Tap Areas */}
         <button
           type="button"
           onClick={goPrev}
@@ -660,7 +660,6 @@ const StatusViewer = ({ group, onClose, onReshareStory }) => {
           className="absolute right-0 top-16 bottom-24 w-1/3 z-20 opacity-0"
         />
 
-        {/* Profile Sheet */}
         {selectedUsernameForProfile && (
           <UserProfileModal
             username={selectedUsernameForProfile}

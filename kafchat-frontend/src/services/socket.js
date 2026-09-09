@@ -2,7 +2,6 @@ import { io } from "socket.io-client";
 
 let socket = null;
 
-// Dynamic URL: Mobile aur Laptop dono ke IP ko auto-detect karega
 const getSocketUrl = () => {
   if (typeof window !== "undefined" && window.location) {
     return `http://${window.location.hostname}:5000`;
@@ -10,7 +9,6 @@ const getSocketUrl = () => {
   return "http://localhost:5000";
 };
 
-// 1. connectSocket (Jo AuthContext.jsx expect kar raha hai)
 export const connectSocket = (token) => {
   if (socket) {
     socket.disconnect();
@@ -28,6 +26,11 @@ export const connectSocket = (token) => {
     withCredentials: true,
   });
 
+  // 👉 Is line ko yahan add kar dein taaki window.socket hamesha available rahe
+  if (typeof window !== "undefined") {
+    window.socket = socket;
+  }
+
   socket.on("connect", () => {
     console.log("⚡ Socket connected successfully:", socket.id);
   });
@@ -39,10 +42,8 @@ export const connectSocket = (token) => {
   return socket;
 };
 
-// 2. initSocket (Alias for connectSocket)
 export const initSocket = (token) => connectSocket(token);
 
-// 3. getSocket (Used in CallContext.js / ChatContext.js)
 export const getSocket = () => {
   if (!socket) {
     const token =
@@ -54,11 +55,13 @@ export const getSocket = () => {
   return socket;
 };
 
-// 4. disconnectSocket (Used on Logout)
 export const disconnectSocket = () => {
   if (socket) {
     socket.disconnect();
     socket = null;
+    if (typeof window !== "undefined") {
+      window.socket = null;
+    }
   }
 };
 

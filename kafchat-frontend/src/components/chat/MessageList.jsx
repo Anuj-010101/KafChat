@@ -38,6 +38,7 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
     togglePinMessage,
     onlineUserIds = [],
     isVip,
+    socket,
   } = useChat();
 
   const [hoveredMsgId, setHoveredMsgId] = useState(null);
@@ -52,6 +53,7 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
   const isSelfChat = Boolean(activeChat?.isSelfChat);
   const isSavedCloud = Boolean(activeChat?.isSavedCloud);
   const isGroup = Boolean(activeChat?.isGroupChat);
+  const currentUserIsVIP = Boolean(user?.isVIP || isVip);
 
   // Close context menu on outside click
   useEffect(() => {
@@ -64,6 +66,49 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
     document.addEventListener("mousedown", handleOutsideClick);
     return () => document.removeEventListener("mousedown", handleOutsideClick);
   }, []);
+
+  // 📸 PRO/VIP SNAPCHAT SCREENSHOT & RECORDING LISTENER
+  useEffect(() => {
+    const activeSocket = socket || window.socket;
+    if (!activeSocket) return;
+
+    const handleScreenshotAlert = (data) => {
+      if (data?.alertText && currentUserIsVIP) {
+        toast(data.alertText, {
+          icon: '🚨',
+          duration: 5000,
+          style: {
+            background: '#121212',
+            color: '#ff4b4b',
+            border: '1px solid rgba(255, 75, 75, 0.4)',
+            fontSize: '12px',
+            fontWeight: 'bold',
+          },
+        });
+      }
+    };
+
+    activeSocket.on("screenshot_alert", handleScreenshotAlert);
+
+    // Native browser shortcut detection (PrintScreen)
+    const handleKeyDown = (e) => {
+      if (e.key === "PrintScreen" || (e.ctrlKey && e.shiftKey && e.key === "S")) {
+        if (activeChat?._id) {
+          activeSocket.emit("screenshot_taken", {
+            chatId: activeChat._id,
+            username: user?.username,
+            captureType: "screenshot",
+          });
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      activeSocket.off("screenshot_alert", handleScreenshotAlert);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [activeChat?._id, user?.username, currentUserIsVIP, socket]);
 
   const handleOpenStoryContext = (statusId) => {
     if (!statusId) return;
@@ -225,20 +270,35 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
           );
         }
 
-        // Anti-Delete Handling
+        // Anti-Delete Handling for Pro / VIP Users vs Normal Users
         if (msg.deletedForEveryone) {
-          if (isVip && msg.recoveredText) {
+          if (currentUserIsVIP || msg.isAntiDeleteRecovered) {
             return (
               <div
                 key={msg._id}
-                className={`flex flex-col my-1 ${isMe ? "items-end" : "items-start"}`}
+                onMouseEnter={() => setHoveredMsgId(msg._id)}
+                onMouseLeave={() => setHoveredMsgId(null)}
+                className={`flex flex-col my-1 relative group ${isMe ? "items-end" : "items-start"}`}
               >
-                <div className="max-w-[75%] px-3 py-2 rounded-2xl bg-gradient-to-r from-red-500/10 via-pink-500/10 to-amber-500/10 border border-pink-500/30 text-xs text-white flex flex-col gap-0.5 shadow-md">
+                <div className="max-w-[75%] px-3 py-2 rounded-2xl bg-gradient-to-r from-red-500/10 via-pink-500/10 to-amber-500/10 border border-pink-500/30 text-xs text-white flex flex-col gap-1 shadow-md relative">
                   <span className="text-[9px] font-bold text-pink-400 flex items-center gap-1">
-                    <FiTrash2 size={10} /> 👑 VIP Recovered:
+                    <FiTrash2 size={10} /> 👑 VIP Recovered (Deleted by @{msg.sender?.username || "user"}):
                   </span>
-                  <p className="line-through text-slate-300 opacity-90">{msg.recoveredText}</p>
+                  <p className="line-through text-slate-300 opacity-90">{msg.text || "Original message content"}</p>
                 </div>
+
+                {isHovered && (
+                  <div className={`absolute top-1 ${isMe ? "-left-10" : "-right-10"} flex items-center z-20`}>
+                    <button
+                      type="button"
+                      onClick={() => setDeleteModalMsg(msg)}
+                      className="p-1.5 rounded-full theme-soft-bg text-red-400 hover:bg-red-500/20 border theme-border shadow transition"
+                      title="Delete options"
+                    >
+                      <FiTrash2 size={12} />
+                    </button>
+                  </div>
+                )}
               </div>
             );
           }
@@ -246,12 +306,27 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
           return (
             <div
               key={msg._id}
-              className={`flex flex-col my-1 ${isMe ? "items-end" : "items-start"}`}
+              onMouseEnter={() => setHoveredMsgId(msg._id)}
+              onMouseLeave={() => setHoveredMsgId(null)}
+              className={`flex flex-col my-1 relative group ${isMe ? "items-end" : "items-start"}`}
             >
               <div className="max-w-[75%] px-3 py-1.5 rounded-xl bg-gray-500/10 border border-gray-500/20 text-xs italic text-gray-400 flex items-center gap-1.5">
                 <FiTrash2 size={12} />
                 <span>This message was deleted</span>
               </div>
+
+              {isHovered && (
+                <div className={`absolute top-1 ${isMe ? "-left-10" : "-right-10"} flex items-center z-20`}>
+                  <button
+                    type="button"
+                    onClick={() => setDeleteModalMsg(msg)}
+                    className="p-1.5 rounded-full theme-soft-bg text-red-400 hover:bg-red-500/20 border theme-border shadow transition"
+                    title="Delete for me"
+                  >
+                    <FiTrash2 size={12} />
+                  </button>
+                </div>
+              )}
             </div>
           );
         }
@@ -297,14 +372,13 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
                   </div>
                 )}
 
-                {/* ULTRA-COMPACT INSTAGRAM MENTION CARD (Mini Pill Size: w-44, h-14) */}
+                {/* ULTRA-COMPACT INSTAGRAM MENTION CARD */}
                 {msg.storyContext && (
                   <div className="mb-1 w-44 rounded-xl overflow-hidden border border-white/15 bg-black/60 shadow-sm flex flex-col select-none">
                     <div
                       onClick={() => handleOpenStoryContext(msg.storyContext.statusId)}
                       className="flex items-center gap-1.5 p-1.5 cursor-pointer hover:bg-white/5 transition"
                     >
-                      {/* Mini Square Thumbnail (36x36px) */}
                       <div
                         className="w-9 h-9 rounded-lg shrink-0 overflow-hidden flex items-center justify-center text-center border border-white/10"
                         style={{
@@ -332,7 +406,6 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
                         )}
                       </div>
 
-                      {/* Header Context */}
                       <div className="flex flex-col min-w-0 flex-1 leading-tight">
                         <span className="text-[9px] font-bold text-pink-400 flex items-center gap-0.5 truncate">
                           <FiAtSign size={8} /> Story Mention
@@ -343,7 +416,6 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
                       </div>
                     </div>
 
-                    {/* Slim Reshare Pill Button */}
                     {msg.storyContext?.canReshare && !isMe && (
                       <button
                         type="button"
@@ -377,7 +449,6 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
                   </div>
                 )}
 
-                {/* Regular Image (Story Mention hone par badi photo suppress kar di hai taaki card compact rahe) */}
                 {msg.mediaUrl && msg.mediaType === "image" && !msg.storyContext && (
                   <div className="rounded-xl overflow-hidden my-1 max-h-60 bg-black/10">
                     <img
@@ -486,7 +557,6 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
                   </div>
                 )}
 
-                {/* Plain text sirf tab dikhega jab storyContext na ho ya custom text ho */}
                 {msg.text && !msg.storyContext && (
                   <p className="whitespace-pre-wrap break-words leading-relaxed">{msg.text}</p>
                 )}
@@ -713,13 +783,14 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
               <FiTrash2 className="text-red-500" /> Delete message?
             </h4>
             <p className="text-xs theme-text-muted leading-relaxed">
-              Choose an option to delete this message.
+              Choose an option to remove this message.
             </p>
 
             <div className="flex flex-col gap-1.5 mt-1">
               {(deleteModalMsg.sender?._id || deleteModalMsg.sender)?.toString() === currentUserId &&
                 !isSelfChat &&
-                !isSavedCloud && (
+                !isSavedCloud &&
+                !deleteModalMsg.deletedForEveryone && (
                   <button
                     type="button"
                     onClick={() => handleDeleteConfirm(true)}

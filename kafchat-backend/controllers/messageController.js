@@ -11,13 +11,13 @@ const formatBytes = (bytes) => {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
 };
 
-// @desc Get all messages for a specific chat (Includes Anti-Delete & E2EE logic)
+// @desc Get all messages for a specific chat (Includes Anti-Delete Pro recovery logic)
 // @route GET /api/messages/:chatId
 exports.getMessages = async (req, res) => {
   try {
     const { chatId } = req.params;
     const userId = req.user._id;
-    const isVIP = req.user.isVIP;
+    const isVIP = Boolean(req.user.isVIP);
 
     if (!chatId || !mongoose.Types.ObjectId.isValid(chatId)) {
       return res.status(400).json({ success: false, message: "Invalid chat ID" });
@@ -75,8 +75,10 @@ exports.getMessages = async (req, res) => {
       const msgObj = m.toObject();
       if (msgObj.deletedForEveryone) {
         if (isVIP) {
+          // Pro / VIP user sees the original message with an anti-delete recovered indicator tag
           msgObj.isAntiDeleteRecovered = true;
         } else {
+          // Normal user sees standard placeholder
           msgObj.text = "This message was deleted";
           msgObj.encryptedContent = "";
           msgObj.iv = "";

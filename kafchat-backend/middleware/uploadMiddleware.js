@@ -19,37 +19,25 @@ const diskStorage = multer.diskStorage({
 });
 
 const fileFilter = (req, file, cb) => {
-  const isVIP = req.user?.isVIP || false;
-
-  // 1. Image upload filter (Max 5MB)
-  if (file.mimetype.startsWith("image/")) {
+  if (
+    file.mimetype.startsWith("image/") ||
+    file.mimetype.startsWith("video/") ||
+    file.mimetype.startsWith("audio/")
+  ) {
     return cb(null, true);
   }
-
-  // 2. Video upload filter (Max 25MB - Strict 720p cap)
-  if (file.mimetype.startsWith("video/")) {
-    return cb(null, true);
-  }
-
-  // 3. Audio upload filter (Max 10MB - 32kbps mono)
-  if (file.mimetype.startsWith("audio/")) {
-    return cb(null, true);
-  }
-
-  // 4. Documents mode
   return cb(null, true);
 };
 
-// Strict Storage Caps
 const uploadMedia = multer({
   storage: diskStorage,
   fileFilter,
   limits: {
-    fileSize: 30 * 1024 * 1024, // 30MB hard maximum for 720p video
+    fileSize: 30 * 1024 * 1024, // 30MB Limit
   },
 });
 
 module.exports = {
-  uploadSingle: uploadMedia.single("file"),
+  uploadSingle: uploadMedia.single("media"), // ✅ Field name matches frontend FormData
   uploadMultiple: uploadMedia.array("files", 10),
 };

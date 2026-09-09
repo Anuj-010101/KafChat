@@ -1,11 +1,22 @@
 import api from "./api";
 
 export const statusService = {
-  createStatus: (payload) => api.post("/status", payload),
+  getFeed: async () => {
+    return await api.get("/status/feed");
+  },
 
-  getFeed: () => api.get("/status"),
+  createStatus: async (payload) => {
+    const isFormData = payload instanceof FormData;
+    return await api.post("/status", payload, {
+      headers: isFormData ? { "Content-Type": "multipart/form-data" } : {},
+    });
+  },
 
-  viewStatus: (statusId) => api.post(`/status/${statusId}/view`),
+  viewStatus: async (statusId) => {
+    return await api.post(`/status/${statusId}/view`);
+  },
 
-  deleteStatus: (statusId) => api.delete(`/status/${statusId}`),
+  deleteStatus: async (statusId) => {
+    return await api.delete(`/status/${statusId}`);
+  },
 };

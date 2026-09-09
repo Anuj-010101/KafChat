@@ -1,6 +1,7 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 const Message = require("../models/Message");
+const Chat = require("../models/Chat");
 const Call = require("../models/Call");
 
 const onlineUsers = new Map(); // userId -> Set of socketIds
@@ -161,13 +162,22 @@ const initSocket = (io) => {
       io.to(chatId.toString()).emit("snap_messages_wiped", { chatId });
     });
 
-    // 10. Screenshot Alert
-    socket.on("screenshot_taken", ({ chatId, username }) => {
+    // 10. Snapchat-Style Pro/VIP Screenshot & Screen Recording Detection
+    socket.on("screenshot_taken", async ({ chatId, username, captureType }) => {
       if (!chatId) return;
-      io.to(chatId.toString()).emit("screenshot_alert", {
-        alertText: `📸 ${username || socket.user.username} took a screenshot!`,
-        timestamp: new Date(),
-      });
+      try {
+        const actionType = captureType === "recording" ? "screen recording" : "screenshot";
+
+        // Broadcast to chat room; client side handles Pro/VIP filtering instantly
+        io.to(chatId.toString()).emit("screenshot_alert", {
+          chatId,
+          senderId: userId,
+          alertText: `📸 @${username || socket.user.username} took a ${actionType}!`,
+          timestamp: new Date(),
+        });
+      } catch (err) {
+        console.error("screenshot_taken socket error:", err);
+      }
     });
 
     // 11. Listen Together (Music Sync)
@@ -309,7 +319,7 @@ const initSocket = (io) => {
           console.error("Failed to set offline status:", err);
         }
         if (!isGhost) {
-          socket.broadcast.emit("user_offline", { userId, lastSeen });
+          socket.broadcast.emit("user_online", { userId, lastSeen });
           io.emit("online_users", getOnlineUserIds());
         }
       }

@@ -1,3 +1,4 @@
+console.log("⚡ CreateStatusModal Component Rendered!");
 import { useState, useRef, useEffect } from "react";
 import {
   FiX,
@@ -13,10 +14,11 @@ import {
   FiEyeOff,
 } from "react-icons/fi";
 import Avatar from "../common/Avatar";
-import Button from "../common/Button";
 import { useStatus } from "../../hooks/useStatus";
 import StickerDrawer from "./StickerDrawer";
 import MusicPickerModal from "./MusicPickerModal";
+import api from "../../services/api";
+import toast from "react-hot-toast";
 
 const BG_COLORS = [
   "#0284C7",
@@ -77,6 +79,7 @@ const CreateStatusModal = ({ onClose, initialReshareData = null }) => {
   const [mediaUrl, setMediaUrl] = useState(
     isReshareMode ? initialReshareData.mediaUrl || "" : ""
   );
+  const [selectedFile, setSelectedFile] = useState(null);
   const [attachedSong, setAttachedSong] = useState(null);
   const [stickers, setStickers] = useState([]);
   const [privacy, setPrivacy] = useState("everyone");
@@ -96,12 +99,10 @@ const CreateStatusModal = ({ onClose, initialReshareData = null }) => {
   const activeIdxRef = useRef(null);
   const isOverTrashRef = useRef(false);
 
-  // Multi-touch tracking
   const touchesRef = useRef(new Map());
   const initialPinchDistRef = useRef(null);
   const initialPinchScaleRef = useRef(1);
 
-  // Touch Start Handler (Multi-touch enabled)
   const handleTouchStart = (idx, e) => {
     e.stopPropagation();
     activeIdxRef.current = idx;
@@ -132,7 +133,6 @@ const CreateStatusModal = ({ onClose, initialReshareData = null }) => {
   const handlePointerMove = (e) => {
     if (activeIdxRef.current === null || !canvasRef.current) return;
 
-    // Pinch Zoom Handling (2 fingers)
     if (e.touches && e.touches.length === 2) {
       const currentDist = Math.hypot(
         e.touches[0].clientX - e.touches[1].clientX,
@@ -148,7 +148,6 @@ const CreateStatusModal = ({ onClose, initialReshareData = null }) => {
       return;
     }
 
-    // 1 Finger Dragging
     const rect = canvasRef.current.getBoundingClientRect();
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     const clientY = e.touches ? e.touches[0].clientY : e.clientY;
@@ -192,67 +191,106 @@ const CreateStatusModal = ({ onClose, initialReshareData = null }) => {
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (file) {
+      console.log("📁 File selected from input:", file.name, file.size, file.type);
+      setSelectedFile(file);
       const reader = new FileReader();
       reader.onloadend = () => setMediaUrl(reader.result);
       reader.readAsDataURL(file);
     }
   };
 
-  const handlePost = async () => {
+const handlePost = async () => {
+    console.log("🔥 Publish button clicked!");
+    console.log("Current Mode:", mode);
+    console.log("Selected File:", selectedFile);
+    console.log("Media URL:", mediaUrl ? mediaUrl.slice(0, 30) + "..." : "Empty");
+
     setPosting(true);
     try {
-      const payload = {
-        mediaType: isReshareMode
-          ? initialReshareData.mediaType || "text"
-          : mode === "text"
-          ? "text"
-          : "image",
-        mediaUrl: isReshareMode
-          ? initialReshareData.mediaUrl
-          : mode === "media"
-          ? mediaUrl || null
-          : null,
-        text: isReshareMode ? initialReshareData.text : text.trim(),
-        overlayText: isReshareMode ? text.trim() : "",
-        backgroundColor: isReshareMode ? initialReshareData.backgroundColor || bgColor : bgColor,
-        textColor: isReshareMode ? initialReshareData.textColor || textColor : textColor,
-        fontFamily: fontFamily,
-        hasTextHighlight: hasTextHighlight,
-        privacy: privacy,
-        duration: attachedSong ? Number(duration) || 15 : 10,
-        stickers: stickers,
-        isReshare: isReshareMode,
-        originalAuthor: initialReshareData?.authorId || null,
-        reshareSnapshot: isReshareMode
-          ? {
-              statusId: initialReshareData.statusId,
-              authorId: initialReshareData.authorId,
-              authorName: initialReshareData.authorName || "User",
-              authorUsername: initialReshareData.authorUsername || "user",
-              authorAvatar: initialReshareData.authorAvatar || "",
-              mediaType: initialReshareData.mediaType || "text",
-              mediaUrl: initialReshareData.mediaUrl || null,
-              text: initialReshareData.text || "",
-              backgroundColor: initialReshareData.backgroundColor || "#0284C7",
-              textColor: initialReshareData.textColor || "#ffffff",
-            }
-          : null,
-        attachedSong: attachedSong
-          ? {
-              title: attachedSong.title,
-              artist: attachedSong.artist,
-              audioUrl: attachedSong.audioUrl,
-            }
-          : null,
-      };
+      const formData = new FormData();
+      
+      const determinedMediaType = isReshareMode
+        ? initialReshareData.mediaType || "text"
+        : mode === "text"
+        ? "text"
+        : "image";
 
-      if (!isReshareMode && mode === "text" && !text.trim() && stickers.length === 0) return;
-      if (!isReshareMode && mode === "media" && !mediaUrl) return;
+      formData.append("mediaType", determinedMediaType);
+      formData.append("text", isReshareMode ? initialReshareData.text : text.trim());
+      formData.append("overlayText", isReshareMode ? text.trim() : "");
+      formData.append(
+        "backgroundColor",
+        isReshareMode ? initialReshareData.backgroundColor || bgColor : bgColor
+      );
+      formData.append(
+        "textColor",
+        isReshareMode ? initialReshareData.textColor || textColor : textColor
+      );
+      formData.append("fontFamily", fontFamily);
+      formData.append("hasTextHighlight", hasTextHighlight);
+      formData.append("privacy", privacy);
+      formData.append("duration", attachedSong ? Number(duration) || 15 : 10);
+      formData.append("stickers", JSON.stringify(stickers));
+      formData.append("isReshare", isReshareMode);
 
-      await postStatus(payload);
+      if (isReshareMode && initialReshareData?.authorId) {
+        formData.append("originalAuthor", initialReshareData.authorId);
+      }
+
+      if (isReshareMode && initialReshareData) {
+        formData.append(
+          "reshareSnapshot",
+          JSON.stringify({
+            statusId: initialReshareData.statusId,
+            authorId: initialReshareData.authorId,
+            authorName: initialReshareData.authorName || "User",
+            authorUsername: initialReshareData.authorUsername || "user",
+            authorAvatar: initialReshareData.authorAvatar || "",
+            mediaType: initialReshareData.mediaType || "text",
+            mediaUrl: initialReshareData.mediaUrl || null,
+            text: initialReshareData.text || "",
+            backgroundColor: initialReshareData.backgroundColor || "#0284C7",
+            textColor: initialReshareData.textColor || "#ffffff",
+          })
+        );
+      }
+
+      if (attachedSong) {
+        formData.append("attachedSong", JSON.stringify(attachedSong));
+      }
+
+      // ✅ Robust appending check
+      if (selectedFile) {
+        formData.append("media", selectedFile);
+      } else if (mediaUrl && mediaUrl.startsWith("http")) {
+        formData.append("mediaUrl", mediaUrl);
+      }
+
+      // Validations
+      if (!isReshareMode && mode === "text" && !text.trim() && stickers.length === 0) {
+        toast.error("Please add some text or content");
+        setPosting(false);
+        return;
+      }
+      
+      // 🛠️ Yahan check karein ki agar photo mode hai aur file select nahi hui toh toast aaye
+      if (!isReshareMode && mode === "media" && !selectedFile && (!mediaUrl || mediaUrl.startsWith("data:"))) {
+        toast.error("Please select a valid photo file");
+        setPosting(false);
+        return;
+      }
+
+      console.log("🚀 Sending photo status to backend...");
+      const res = await api.post("/status", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+
+      console.log("✅ Success response:", res.data);
+      toast.success("Status posted successfully! 🚀");
       onClose();
     } catch (err) {
-      console.error(err);
+      console.error("❌ Error posting photo status:", err);
+      toast.error(err.response?.data?.message || "Couldn't post status");
     } finally {
       setPosting(false);
     }
@@ -263,7 +301,6 @@ const CreateStatusModal = ({ onClose, initialReshareData = null }) => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md px-3 select-none animate-fadeIn">
       <div className="w-full max-w-sm bg-[#121212] border border-white/10 rounded-3xl shadow-2xl flex flex-col h-[92vh] max-h-[780px] relative overflow-hidden">
-        {/* Top Instagram Action Bar */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 shrink-0 z-30">
           <div className="flex items-center gap-2">
             <h2 className="text-xs font-bold text-white uppercase tracking-wider">
@@ -293,7 +330,6 @@ const CreateStatusModal = ({ onClose, initialReshareData = null }) => {
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Instagram Aa Text Button */}
             <button
               type="button"
               onClick={() => {
@@ -349,7 +385,6 @@ const CreateStatusModal = ({ onClose, initialReshareData = null }) => {
           </div>
         </div>
 
-        {/* Mode Switcher */}
         {!isReshareMode && (
           <div className="flex gap-1 px-4 pt-2 shrink-0 z-30">
             <button
@@ -389,7 +424,6 @@ const CreateStatusModal = ({ onClose, initialReshareData = null }) => {
           className="hidden"
         />
 
-        {/* Story Viewport Canvas */}
         <div
           ref={canvasRef}
           onTouchStart={handleCanvasTouchStart}
@@ -406,7 +440,6 @@ const CreateStatusModal = ({ onClose, initialReshareData = null }) => {
             backgroundColor: isReshareMode ? bgColor : mode === "text" ? bgColor : "#000000",
           }}
         >
-          {/* USER 1 ORIGINAL CARD (LOCKED IN RESHARE STUDIO) */}
           {isReshareMode && (
             <div className="w-[84%] max-h-[64%] rounded-2xl overflow-hidden border border-white/20 bg-black/60 shadow-2xl flex flex-col relative pointer-events-none z-10 select-none">
               <div className="p-2.5 bg-black/50 backdrop-blur-sm flex items-center justify-between border-b border-white/10">
@@ -452,7 +485,6 @@ const CreateStatusModal = ({ onClose, initialReshareData = null }) => {
             </div>
           )}
 
-          {/* Photo Canvas (Clean, No Forced Text) */}
           {!isReshareMode && mode === "media" && (
             <div className="w-full h-full absolute inset-0 flex items-center justify-center bg-black">
               {mediaUrl ? (
@@ -478,7 +510,6 @@ const CreateStatusModal = ({ onClose, initialReshareData = null }) => {
             </div>
           )}
 
-          {/* Text Layer (Only active when typing or in text mode) */}
           {(mode === "text" || isTypingActive || text) && (
             <div
               className={`w-full px-4 text-center z-20 ${
@@ -505,7 +536,6 @@ const CreateStatusModal = ({ onClose, initialReshareData = null }) => {
             </div>
           )}
 
-          {/* Draggable & Pinch-Zoomable Stickers */}
           {stickers.map((st, idx) => {
             const isOffScreen = st.x < -10 || st.x > 110 || st.y < -10 || st.y > 110;
             const isSelected = selectedStickerIdx === idx;
@@ -574,10 +604,14 @@ const CreateStatusModal = ({ onClose, initialReshareData = null }) => {
             );
           })}
 
-          {/* Trash Can Dropzone */}
           {activeDraggingIdx !== null && (
             <div
-              onClick={() => handleRemoveStickerDirect(activeDraggingIdx)}
+              onClick={() => {
+                const idxToDelete = activeDraggingIdx;
+                setStickers((prev) => prev.filter((_, idx) => idx !== idxToDelete));
+                setSelectedStickerIdx(null);
+                setActiveDraggingIdx(null);
+              }}
               className={`absolute bottom-3 inset-x-0 mx-auto w-12 h-12 rounded-full flex items-center justify-center transition-all duration-200 z-40 cursor-pointer ${
                 isOverTrash
                   ? "bg-red-500 text-white scale-125 shadow-lg shadow-red-500/50"
@@ -590,7 +624,6 @@ const CreateStatusModal = ({ onClose, initialReshareData = null }) => {
           )}
         </div>
 
-        {/* Selected Sticker Badge Customizer */}
         {activeSticker && (activeSticker.type === "mention" || activeSticker.type === "hashtag") && (
           <div className="px-4 py-1.5 border-t border-white/10 bg-black/60 backdrop-blur-md flex items-center justify-between shrink-0 z-30">
             <span className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider">
@@ -637,7 +670,6 @@ const CreateStatusModal = ({ onClose, initialReshareData = null }) => {
           </div>
         )}
 
-        {/* Font Carousel */}
         <div className="px-4 py-1 flex items-center gap-1.5 overflow-x-auto scrollbar-none shrink-0 border-t border-white/10 z-30">
           {FONTS.map((f) => {
             const isFontActive = activeSticker
@@ -669,7 +701,6 @@ const CreateStatusModal = ({ onClose, initialReshareData = null }) => {
           })}
         </div>
 
-        {/* Color Palette */}
         <div className="px-4 py-1.5 flex flex-col gap-1 shrink-0 z-30">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-bold text-white/60 uppercase tracking-wider flex items-center gap-1">
@@ -691,15 +722,19 @@ const CreateStatusModal = ({ onClose, initialReshareData = null }) => {
           </div>
         </div>
 
-        {/* Publish Button */}
+        {/* Publish Button (Direct HTML button for 100% click reliability) */}
         <div className="p-3 border-t border-white/10 shrink-0 z-30">
-          <Button
-            onClick={handlePost}
-            loading={posting}
-            className="w-full py-2.5 text-xs font-bold rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-lg hover:opacity-95"
+          <button
+            type="button"
+            onClick={() => {
+              console.log("🟢 Direct HTML Button Clicked!");
+              handlePost();
+            }}
+            disabled={posting}
+            className="w-full py-2.5 text-xs font-bold rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-lg hover:opacity-95 cursor-pointer disabled:opacity-50"
           >
-            {isReshareMode ? "Add to your story 🚀" : `Publish Story ${privacy === "close_friends" ? "⭐" : "🚀"}`}
-          </Button>
+            {posting ? "Posting..." : isReshareMode ? "Add to your story 🚀" : `Publish Story ${privacy === "close_friends" ? "⭐" : "🚀"}`}
+          </button>
         </div>
 
         {showStickerDrawer && (
