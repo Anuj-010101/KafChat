@@ -100,16 +100,22 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const loginWithGoogle = useCallback(
-    async (credentialToken) => {
+    async (credentialToken, targetUserId = null) => {
       const deviceId = localStorage.getItem("kafchat_device_id") || "root_device_" + Date.now();
       localStorage.setItem("kafchat_device_id", deviceId);
 
       const res = await api.post("/auth/google", {
         token: credentialToken,
         deviceId,
+        targetUserId, // Agar user ne account select kiya hai toh ID jayegi
       });
 
       if (res.data?.success) {
+        // Agar multiple accounts milte hain ya naya user hai, toh response return karo taaki frontend popup ya registration form khol sake
+        if (res.data.hasExistingAccounts || res.data.isNewUser) {
+          return res.data; 
+        }
+
         completeAuth(res.data);
         toast.success(`Welcome back, ${res.data.user?.fullName?.split(" ")[0] || "User"}! 🎉`);
         return res.data;
@@ -221,7 +227,6 @@ export const AuthProvider = ({ children }) => {
     return data;
   }, []);
 
-  // Set & Synchronously update user state and storage
   const setChatLockPin = useCallback(async (pin) => {
     const cleanPin = pin.toString().trim();
     const { data } = await authService.setChatLockPin(cleanPin);

@@ -12,10 +12,12 @@ const GoogleLoginBtn = ({ onLoginSuccess, onError }) => {
         throw new Error("No credential received from Google popup");
       }
 
-      await loginWithGoogle(credentialResponse.credential);
+      // Backend response capture karo (isme hasExistingAccounts ya isNewUser data hota hai)
+      const resData = await loginWithGoogle(credentialResponse.credential);
 
       if (onLoginSuccess) {
-        onLoginSuccess();
+        // response data ke sath credential token bhi bhej do taaki modal se login karte waqt kaam aaye
+        onLoginSuccess({ ...resData, credentialToken: credentialResponse.credential });
       }
     } catch (err) {
       console.error("Google Login Error:", err);

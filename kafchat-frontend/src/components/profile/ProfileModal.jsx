@@ -40,6 +40,8 @@ import {
   FiCheckCircle,
   FiHelpCircle,
   FiMessageSquare,
+  FiMail,
+  FiInfo,
 } from "react-icons/fi";
 import Button from "../common/Button";
 import DualProfileBanner from "../common/DualProfileBanner";
@@ -54,6 +56,12 @@ import api from "../../services/api";
 import toast from "react-hot-toast";
 
 const SETTINGS_TOOLS = [
+  {
+    id: "About Me",
+    label: "About Me",
+    desc: "Basic account details, email, tier & membership date",
+    icon: <FiInfo size={16} />,
+  },
   {
     id: "My Posts",
     label: "Posts, DPs & Community",
@@ -200,7 +208,7 @@ const ProfileModal = ({ onClose }) => {
 
   const isVip = Boolean(user?.isVIP);
 
-  const [activeTab, setActiveTab] = useState("My Posts");
+  const [activeTab, setActiveTab] = useState("About Me");
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [themeSubTab, setThemeSubTab] = useState("mode");
   const [showAvatarStudio, setShowAvatarStudio] = useState(false);
@@ -223,9 +231,9 @@ const ProfileModal = ({ onClose }) => {
   // Social Community
   const [followersList, setFollowersList] = useState([]);
   const [followingList, setFollowingList] = useState([]);
-  const [socialModalType, setSocialModalType] = useState(null); // "followers" | "following"
+  const [socialModalType, setSocialModalType] = useState(null);
   const [socialSearch, setSocialSearch] = useState("");
-  const [viewingProfileUser, setViewingProfileUser] = useState(null); // Instagram style profile inspection modal
+  const [viewingProfileUser, setViewingProfileUser] = useState(null);
 
   // Form Fields
   const [fullName, setFullName] = useState(user?.fullName || "");
@@ -240,7 +248,6 @@ const ProfileModal = ({ onClose }) => {
 
   const [location, setLocation] = useState(user?.location || "");
   const [website, setWebsite] = useState(user?.website || "");
-  const [showPhone, setShowPhone] = useState(Boolean(user?.showPhone));
   const [showDob, setShowDob] = useState(Boolean(user?.showDob));
   const [savingProfile, setSavingProfile] = useState(false);
 
@@ -278,6 +285,8 @@ const ProfileModal = ({ onClose }) => {
   const [sessions, setSessions] = useState([]);
   const [selectedPlanForPayment, setSelectedPlanForPayment] = useState(null);
   const [processingPayment, setProcessingPayment] = useState(false);
+
+  const otherDevices = sessions.filter((s) => !s.isCurrent);
 
   const multiDpInputRef = useRef(null);
   const maxAllowedDps = isVip ? 5 : 1;
@@ -535,7 +544,6 @@ const ProfileModal = ({ onClose }) => {
         dob: formattedDob,
         location,
         website,
-        showPhone,
         showDob,
         isPrivateAccount,
         isGhostModeActive,
@@ -665,7 +673,6 @@ const ProfileModal = ({ onClose }) => {
     return <FiMonitor size={15} />;
   };
 
-  const otherDevices = sessions.filter((s) => !s.isCurrent);
   const activeUserPin = (user?.lockPin || pin || "").toString().replace(/^\$/, "");
 
   return (
@@ -780,6 +787,61 @@ const ProfileModal = ({ onClose }) => {
                 !mobileDetailOpen ? "hidden sm:block" : "block"
               }`}
             >
+              {/* TOOL 0: ABOUT PROFILE */}
+              {activeTab === "About Profile" && (
+                <div className="flex flex-col gap-4">
+                  <div className="flex items-center gap-3 p-4 rounded-3xl theme-soft-bg border theme-border">
+                    <Avatar src={user?.avatar} alt={user?.fullName} size="lg" />
+                    <div className="flex flex-col min-w-0">
+                      <h3 className="text-sm font-bold theme-text flex items-center gap-1.5 truncate">
+                        {user?.fullName}
+                        {isVip && (
+                          <span className="px-1.5 py-0.2 rounded-full bg-amber-400 text-black text-[9px] font-black uppercase">
+                            PRO
+                          </span>
+                        )}
+                      </h3>
+                      <span className="text-xs theme-accent-text font-mono truncate">@{user?.username}</span>
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-2xl theme-soft-bg border theme-border flex flex-col gap-3">
+                    <span className="text-xs font-bold theme-text uppercase tracking-wider">Account Details</span>
+
+                    <div className="flex items-center justify-between py-1.5 border-b theme-border">
+                      <span className="text-xs theme-text-muted flex items-center gap-2"><FiMail size={14} /> Email Address</span>
+                      <span className="text-xs font-semibold theme-text font-mono">{user?.email || "Not linked"}</span>
+                    </div>
+
+                    <div className="flex items-center justify-between py-1.5 border-b theme-border">
+                      <span className="text-xs theme-text-muted flex items-center gap-2"><FiAward size={14} /> Account Tier</span>
+                      <span className={`text-xs font-bold ${isVip ? "text-amber-400" : "theme-text"}`}>
+                        {isVip ? "👑 VIP PRO Member" : "Free Member"}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between py-1.5 border-b theme-border">
+                      <span className="text-xs theme-text-muted flex items-center gap-2"><FiUser size={14} /> Gender</span>
+                      <span className="text-xs font-semibold theme-text">{user?.gender || "Prefer not to say"}</span>
+                    </div>
+
+                    <div className="flex items-center justify-between py-1.5 border-b theme-border">
+                      <span className="text-xs theme-text-muted flex items-center gap-2"><FiCalendar size={14} /> Date of Birth</span>
+                      <span className="text-xs font-semibold theme-text">
+                        {user?.dob ? new Date(user.dob).toLocaleDateString([], { year: "numeric", month: "long", day: "numeric" }) : "Not specified"}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between py-1.5">
+                      <span className="text-xs theme-text-muted flex items-center gap-2"><FiShield size={14} /> Joined KafChat</span>
+                      <span className="text-xs font-semibold theme-text font-mono">
+                        {user?.createdAt ? new Date(user.createdAt).toLocaleDateString([], { year: "numeric", month: "long", day: "numeric" }) : "Recently Joined"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* TOOL 1: POSTS, DPS & COMMUNITY */}
               {activeTab === "My Posts" && (
                 <div className="flex flex-col gap-4">
@@ -1157,28 +1219,6 @@ const ProfileModal = ({ onClose }) => {
                         <div
                           className={`w-5 h-5 rounded-full bg-white transition-transform ${
                             hideReadReceipts ? "translate-x-5" : "translate-x-0"
-                          }`}
-                        />
-                      </button>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-3 pt-2 border-t theme-border">
-                      <div className="flex flex-col min-w-0">
-                        <span className="text-xs font-semibold theme-text">Show Mobile Number</span>
-                        <span className="text-[10px] theme-text-muted">
-                          {showPhone ? "Visible to verified contacts" : "Hidden from profile"}
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setShowPhone(!showPhone)}
-                        className={`w-11 h-6 rounded-full transition-colors relative p-0.5 shrink-0 ${
-                          showPhone ? "theme-accent-bg" : "bg-gray-400 dark:bg-gray-700"
-                        }`}
-                      >
-                        <div
-                          className={`w-5 h-5 rounded-full bg-white transition-transform ${
-                            showPhone ? "translate-x-5" : "translate-x-0"
                           }`}
                         />
                       </button>
@@ -2096,7 +2136,7 @@ const ProfileModal = ({ onClose }) => {
         </div>
       )}
 
-      {/* Instagram-Style User Profile Inspector Modal (No Follow Request Sent on Open) */}
+      {/* Instagram-Style User Profile Inspector Modal */}
       {viewingProfileUser && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-fadeIn"

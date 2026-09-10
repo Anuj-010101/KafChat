@@ -66,11 +66,13 @@ const userSchema = new mongoose.Schema(
       type: String,
       trim: true,
       default: "",
+      sparse: true, // Khali ya duplicate strings par index error aane se rokte hain
     },
     phone: {
       type: String,
       trim: true,
       default: "",
+      sparse: true, // Khali ya duplicate strings par index error aane se rokte hain
     },
     password: {
       type: String,

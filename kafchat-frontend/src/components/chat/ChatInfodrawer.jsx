@@ -917,53 +917,6 @@ const ChatInfoDrawer = ({ isOpen, onClose, messages, onStartCall }) => {
             </div>
           </div>
 
-          {/* 4. Contact Details */}
-          {!isGroup && otherUser && (
-            <div className="p-3.5 rounded-2xl theme-soft-bg/50 border theme-border flex flex-col gap-2.5">
-              <span className="text-[10px] font-bold theme-text-muted uppercase tracking-wider mb-0.5">
-                Contact Details
-              </span>
-
-              <div className="flex items-center gap-3 py-1 border-b theme-border">
-                <div className="w-7 h-7 rounded-lg theme-accent-tint flex items-center justify-center shrink-0">
-                  <FiPhone size={13} />
-                </div>
-                <div className="flex flex-col min-w-0">
-                  <span className="text-[10px] theme-text-muted">Mobile Number</span>
-                  <span className="text-xs font-semibold theme-text">
-                    {otherUser.showPhone
-                      ? otherUser.phone || otherUser.phoneNumber || "Not available"
-                      : "Hidden by user"}
-                  </span>
-                </div>
-              </div>
-
-              {otherUser.dob && (
-                <div className="flex items-center gap-3 py-1 border-b theme-border">
-                  <div className="w-7 h-7 rounded-lg bg-amber-500/10 text-amber-500 flex items-center justify-center shrink-0">
-                    <FiCalendar size={13} />
-                  </div>
-                  <div className="flex flex-col min-w-0">
-                    <span className="text-[10px] theme-text-muted">Date of Birth</span>
-                    <span className="text-xs font-semibold theme-text">
-                      {otherUser.showDob ? formatDate(otherUser.dob) : "Hidden by user"}
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              <div className="flex items-center gap-3 py-1">
-                <div className="w-7 h-7 rounded-lg theme-soft-bg theme-text-muted flex items-center justify-center shrink-0">
-                  <FiShield size={13} />
-                </div>
-                <div className="flex flex-col min-w-0">
-                  <span className="text-[10px] theme-text-muted">Member Since</span>
-                  <span className="text-xs theme-text">{formatDate(otherUser.createdAt)}</span>
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* 5. Conversation Actions */}
           <div className="flex flex-col gap-2 mt-1">
             <button
@@ -1134,7 +1087,7 @@ const ChatInfoDrawer = ({ isOpen, onClose, messages, onStartCall }) => {
                   <p className="text-xs theme-text-muted py-6 text-center">No posts shared yet.</p>
                 ) : (
                   <div className="grid grid-cols-3 gap-1.5 w-full">
-                    {inspectedUserPosts.post.map((post, idx) => (
+                    {inspectedUserPosts.map((post, idx) => (
                       <div
                         key={post._id || idx}
                         className="aspect-square rounded-xl overflow-hidden bg-black border theme-border cursor-pointer group"

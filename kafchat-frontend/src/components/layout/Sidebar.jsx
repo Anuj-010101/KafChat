@@ -21,6 +21,10 @@ import {
   FiClock,
   FiArchive,
   FiShield,
+  FiUser,
+  FiMail,
+  FiPhone,
+  FiKey,
 } from "react-icons/fi";
 import Avatar from "../common/Avatar";
 import StatusBar from "../status/StatusBar";
@@ -35,7 +39,7 @@ import api from "../../services/api";
 import toast from "react-hot-toast";
 
 const Sidebar = ({ mobileVisible }) => {
-  const { user, login } = useAuth();
+  const { user, login, register } = useAuth();
   const {
     chats = [],
     activeChat,
@@ -70,6 +74,16 @@ const Sidebar = ({ mobileVisible }) => {
   const [showActivityModal, setShowActivityModal] = useState(false);
   const [showConnectModal, setShowConnectModal] = useState(false);
   const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
+  
+  // New Account Creation Modal States
+  const [showCreateAccountModal, setShowCreateAccountModal] = useState(false);
+  const [newFullName, setNewFullName] = useState("");
+  const [newUsername, setNewUsername] = useState("");
+  const [newPhone, setNewPhone] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [creatingAccount, setCreatingAccount] = useState(false);
+
   const [hasUnreadActivity, setHasUnreadActivity] = useState(false);
   const [activeBottomNav, setActiveBottomNav] = useState("chats");
 
@@ -215,6 +229,41 @@ const Sidebar = ({ mobileVisible }) => {
       toast.error(err.response?.data?.message || "Failed to switch profile");
     } finally {
       setSwitchingAccount(false);
+    }
+  };
+
+  // Submit Handler for New Account Creation from Sidebar
+  const handleCreateNewAccountSubmit = async (e) => {
+    e.preventDefault();
+    if (!newFullName.trim() || !newUsername.trim() || !newPassword.trim()) {
+      return toast.error("Full Name, Username, and Password are required");
+    }
+    if (newPassword.length < 6) {
+      return toast.error("Password must be at least 6 characters long");
+    }
+
+    setCreatingAccount(true);
+    try {
+      const fallbackDicebear = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(newUsername.toLowerCase().trim())}`;
+      
+      const res = await register({
+        fullName: newFullName.trim(),
+        username: newUsername.toLowerCase().trim(),
+        phoneNumber: newPhone.trim(),
+        email: newEmail.trim() || undefined,
+        password: newPassword,
+        avatar: fallbackDicebear,
+      });
+
+      if (res?.success) {
+        toast.success("New account created & switched successfully! 🎉");
+        setShowCreateAccountModal(false);
+        window.location.reload();
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to create account. If using same phone number, email is mandatory.");
+    } finally {
+      setCreatingAccount(false);
     }
   };
 
@@ -793,12 +842,12 @@ const Sidebar = ({ mobileVisible }) => {
                 type="button"
                 onClick={() => {
                   setShowAccountSwitcher(false);
-                  handleOpenConnectModal();
+                  setShowCreateAccountModal(true); // <--- Opens Create New Account Modal
                 }}
                 className="w-full p-2 rounded-xl text-left text-xs font-semibold theme-text hover:theme-soft-bg flex items-center gap-2 transition"
               >
                 <FiPlus className="theme-accent-text" size={14} />
-                <span>Create / Link New Handle</span>
+                <span>Create New Account</span>
               </button>
 
               <button
@@ -901,6 +950,101 @@ const Sidebar = ({ mobileVisible }) => {
           </div>
         </div>
       </div>
+
+      {/* CREATE NEW ACCOUNT MODAL */}
+      {showCreateAccountModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-fadeIn">
+          <form
+            onSubmit={handleCreateNewAccountSubmit}
+            className="w-full max-w-sm theme-panel-bg border theme-border rounded-3xl p-6 shadow-2xl flex flex-col gap-3.5 animate-bubbleIn"
+          >
+            <div className="flex items-center justify-between pb-2 border-b theme-border">
+              <h4 className="text-sm font-bold theme-text flex items-center gap-2">
+                <FiUser className="theme-accent-text" /> Create New Account
+              </h4>
+              <button
+                type="button"
+                onClick={() => setShowCreateAccountModal(false)}
+                className="theme-text-muted hover:theme-text"
+              >
+                <FiX size={18} />
+              </button>
+            </div>
+
+            <p className="text-[11px] theme-text-muted leading-relaxed">
+              Add a new account. <span className="text-amber-400 font-semibold">Note:</span> If you are linking this to an existing mobile number, providing a Email ID is mandatory.
+            </p>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-semibold theme-text">Full Name *</label>
+              <input
+                type="text"
+                value={newFullName}
+                onChange={(e) => setNewFullName(e.target.value)}
+                placeholder="Enter full name"
+                className="w-full theme-soft-bg border theme-border rounded-xl px-3 py-2 text-xs theme-text outline-none theme-accent-focus"
+                required
+              />
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-semibold theme-text">Username *</label>
+              <input
+                type="text"
+                value={newUsername}
+                onChange={(e) => setNewUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_.]/g, ""))}
+                placeholder="Choose @username"
+                className="w-full theme-soft-bg border theme-border rounded-xl px-3 py-2 text-xs theme-text outline-none theme-accent-focus"
+                required
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-semibold theme-text">Mobile No.</label>
+                <input
+                  type="tel"
+                  value={newPhone}
+                  onChange={(e) => setNewPhone(e.target.value.replace(/\D/g, "").slice(-10))}
+                  placeholder="10-digit mobile"
+                  className="w-full theme-soft-bg border theme-border rounded-xl px-3 py-2 text-xs theme-text outline-none theme-accent-focus"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-semibold theme-text">Email ID</label>
+                <input
+                  type="email"
+                  value={newEmail}
+                  onChange={(e) => setNewEmail(e.target.value)}
+                  placeholder="Required for multi-acc"
+                  className="w-full theme-soft-bg border theme-border rounded-xl px-3 py-2 text-xs theme-text outline-none theme-accent-focus"
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-semibold theme-text">Password *</label>
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="Min 6 characters"
+                className="w-full theme-soft-bg border theme-border rounded-xl px-3 py-2 text-xs theme-text outline-none theme-accent-focus"
+                required
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={creatingAccount}
+              className="w-full py-2.5 rounded-xl theme-accent-bg text-white font-bold text-xs shadow-lg mt-1"
+            >
+              {creatingAccount ? "Creating..." : "Create Account & Login 🎉"}
+            </button>
+          </form>
+        </div>
+      )}
 
       {/* Unlock Single Chat PIN Modal */}
       {unlockChatId && (

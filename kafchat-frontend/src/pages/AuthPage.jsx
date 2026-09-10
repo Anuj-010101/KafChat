@@ -2,7 +2,6 @@ import React, { useState, useEffect } from "react";
 import {
   FiUser,
   FiLock,
-  FiPhone,
   FiMail,
   FiEye,
   FiEyeOff,
@@ -19,7 +18,6 @@ import { useTheme } from "../context/ThemeContext";
 import toast from "react-hot-toast";
 import api from "../services/api";
 import GoogleLoginBtn from "../components/GoogleLoginBtn";
-import PhoneOtpModal from "../components/PhoneOtpModal";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -32,20 +30,27 @@ const YEARS = Array.from({ length: maxValidYear - minValidYear + 1 }, (_, i) => 
 const DAYS = Array.from({ length: 31 }, (_, i) => i + 1);
 
 const AuthPage = () => {
-  const { loginWithPassword, register, checkUsername } = useAuth();
+  const { loginWithPassword, register, checkUsername, loginWithGoogle } = useAuth();
   const { theme } = useTheme();
   const isDarkMode = theme?.mode === "dark";
 
   const [mode, setMode] = useState("signin"); // "signin" | "signup" | "forgot"
-  const [signUpStep, setSignUpStep] = useState(1); // 1 = Verify Contact, 2 = Choose Username, 3 = Details & Password
-  const [isPhoneModalOpen, setIsPhoneModalOpen] = useState(false);
+  const [signUpStep, setSignUpStep] = useState(1); // 1 = Verify Email, 2 = Choose Username, 3 = Details & Password
+
+  // Google Multi-Account Selector Modal States
+  const [googleModalData, setGoogleModalData] = useState(null); // { accounts, email, defaultAvatar, defaultName, credentialToken }
+  const [isGoogleNewUserFlow, setIsGoogleNewUserFlow] = useState(false); // New user registration via Google email
+  const [googleNewUsername, setGoogleNewUsername] = useState("");
+  const [googleNewPassword, setGoogleNewPassword] = useState("");
+  const [googleNewFullName, setGoogleNewFullName] = useState("");
+  const [googleEmailVerified, setGoogleEmailVerified] = useState("");
+  const [googleAvatarUrl, setGoogleAvatarUrl] = useState("");
 
   // Sign In Field
   const [identifier, setIdentifier] = useState("");
   const [signInPassword, setSignInPassword] = useState("");
 
   // Step 1 Verification Fields
-  const [verifiedContactType, setVerifiedContactType] = useState(""); // "phone" | "email"
   const [emailToVerify, setEmailToVerify] = useState("");
   const [emailOtp, setEmailOtp] = useState("");
   const [isEmailOtpSent, setIsEmailOtpSent] = useState(false);
@@ -57,7 +62,6 @@ const AuthPage = () => {
 
   // Step 3 Profile Completion Fields
   const [fullName, setFullName] = useState("");
-  const [phoneNumber, setPhoneNumber] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -115,7 +119,7 @@ const AuthPage = () => {
   const handleSignIn = async (e) => {
     e.preventDefault();
     if (!identifier.trim() || !signInPassword.trim()) {
-      toast.error("Please enter your Username, Email, or Mobile and Password");
+      toast.error("Please enter your Username or Email and Password");
       return;
     }
 
@@ -124,6 +128,70 @@ const AuthPage = () => {
       await loginWithPassword({ identifier: identifier.trim(), password: signInPassword });
     } catch (err) {
       toast.error(err.response?.data?.message || "Invalid credentials. Please check your details.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Google Login Response Handler (Triggers modal or direct login)
+  const handleGoogleAuthResult = async (resData) => {
+    if (resData?.hasExistingAccounts) {
+      setGoogleModalData({
+        accounts: resData.accounts,
+        email: resData.email,
+        defaultAvatar: resData.defaultAvatar,
+        defaultName: resData.defaultName,
+        credentialToken: resData.credentialToken,
+      });
+    } else if (resData?.isNewUser) {
+      setGoogleEmailVerified(resData.email);
+      setGoogleNewFullName(resData.defaultName || "");
+      setGoogleAvatarUrl(resData.defaultAvatar || "");
+      const base = resData.email.split("@")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
+      setGoogleNewUsername(`${base}_${Math.floor(100 + Math.random() * 900)}`);
+      setIsGoogleNewUserFlow(true);
+    } else if (resData?.token) {
+      toast.success("Welcome back! 🎉");
+    }
+  };
+
+  // Select existing account from Google modal
+  const handleSelectGoogleAccount = async (targetUserId, credentialToken) => {
+    setLoading(true);
+    try {
+      await loginWithGoogle(credentialToken, targetUserId);
+      toast.success("Logged in successfully! 🎉");
+      setGoogleModalData(null);
+    } catch (err) {
+      toast.error(err.response?.data?.message || err.message || "Failed to login with selected account");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Create new account using Google Email
+  const handleGoogleNewAccountSubmit = async (e) => {
+    e.preventDefault();
+    if (!googleNewUsername.trim() || !googleNewPassword.trim()) {
+      return toast.error("Username and Password are required");
+    }
+    if (googleNewPassword.length < 6) {
+      return toast.error("Password must be at least 6 characters");
+    }
+
+    setLoading(true);
+    try {
+      await register({
+        fullName: googleNewFullName.trim() || "KafChat User",
+        username: googleNewUsername.trim().toLowerCase(),
+        email: googleEmailVerified,
+        password: googleNewPassword,
+        avatar: googleAvatarUrl,
+      });
+      toast.success("Account created successfully! 🎉");
+      setIsGoogleNewUserFlow(false);
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Registration failed");
     } finally {
       setLoading(false);
     }
@@ -162,7 +230,6 @@ const AuthPage = () => {
       if (res.data.success) {
         toast.success("Email verified successfully! 🎉");
         setEmail(emailToVerify.trim());
-        setVerifiedContactType("email");
         setSignUpStep(2);
       }
     } catch (err) {
@@ -170,13 +237,6 @@ const AuthPage = () => {
     } finally {
       setLoading(false);
     }
-  };
-
-  // Step 1: Phone Verified Callback (via Firebase Modal)
-  const handlePhoneVerified = (cleanPhone) => {
-    setPhoneNumber(cleanPhone);
-    setVerifiedContactType("phone");
-    setSignUpStep(2);
   };
 
   // Step 3: Complete Final Registration
@@ -209,8 +269,7 @@ const AuthPage = () => {
       await register({
         fullName: fullName.trim(),
         username: usernameInput.toLowerCase().trim(),
-        phoneNumber: phoneNumber.trim(),
-        email: email.trim() || undefined,
+        email: email.trim(),
         password,
         gender: gender || "Prefer not to say",
         dob: formattedDob,
@@ -227,7 +286,7 @@ const AuthPage = () => {
   const handleSendResetOtp = async (e) => {
     e.preventDefault();
     if (!forgotIdentifier.trim()) {
-      return toast.error("Please enter your registered Username, Email, or Phone");
+      return toast.error("Please enter your registered Username or Email");
     }
 
     setLoading(true);
@@ -351,7 +410,7 @@ const AuthPage = () => {
             <form onSubmit={handleSignIn} className="flex flex-col gap-4">
               <div className="flex flex-col gap-1.5">
                 <label className={`text-xs font-bold ${isDarkMode ? "text-slate-300" : "text-slate-700"}`}>
-                  Username, Mobile, or Email <span className="text-red-500">*</span>
+                  Username or Email <span className="text-red-500">*</span>
                 </label>
                 <div className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-2xl border ${isDarkMode ? "bg-[#1a1e29] border-slate-800 focus-within:border-cyan-400" : "bg-slate-50 border-slate-300 focus-within:border-cyan-500"}`}>
                   <FiUser size={15} className={isDarkMode ? "text-slate-400" : "text-slate-500"} />
@@ -359,7 +418,7 @@ const AuthPage = () => {
                     type="text"
                     value={identifier}
                     onChange={(e) => setIdentifier(e.target.value)}
-                    placeholder="Enter @username, mobile, or email"
+                    placeholder="@username or email"
                     className={`w-full bg-transparent text-xs outline-none font-medium ${isDarkMode ? "text-white placeholder:text-slate-500" : "text-slate-950 placeholder:text-slate-400"}`}
                     required
                   />
@@ -414,7 +473,10 @@ const AuthPage = () => {
                 <span className={`px-3 text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? "text-slate-500" : "text-slate-400"}`}>or continue with</span>
                 <div className={`flex-grow border-t ${isDarkMode ? "border-slate-800" : "border-slate-200"}`} />
               </div>
-              <GoogleLoginBtn onLoginSuccess={() => { toast.success("Welcome back! 🎉"); }} onError={(msg) => toast.error(msg || "Google Sign-In failed")} />
+              <GoogleLoginBtn 
+                onLoginSuccess={handleGoogleAuthResult} 
+                onError={(msg) => toast.error(msg || "Google Sign-In failed")} 
+              />
             </div>
           </div>
         )}
@@ -425,7 +487,7 @@ const AuthPage = () => {
             <div className="flex items-center justify-between mb-5 px-2">
               <div className={`flex items-center gap-1.5 text-xs font-bold ${signUpStep >= 1 ? "text-cyan-400" : "text-slate-500"}`}>
                 <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] ${signUpStep >= 1 ? "bg-cyan-400 text-slate-950" : "bg-slate-800 text-slate-400"}`}>1</span>
-                <span>Verify</span>
+                <span>Verify Email</span>
               </div>
               <div className={`h-0.5 flex-1 mx-2 ${signUpStep >= 2 ? "bg-cyan-400" : "bg-slate-800"}`} />
               <div className={`flex items-center gap-1.5 text-xs font-bold ${signUpStep >= 2 ? "text-cyan-400" : "text-slate-500"}`}>
@@ -439,33 +501,16 @@ const AuthPage = () => {
               </div>
             </div>
 
-            {/* STEP 1: VERIFY MOBILE OR EMAIL */}
+            {/* STEP 1: VERIFY EMAIL */}
             {signUpStep === 1 && (
               <div className="flex flex-col gap-4">
                 <p className={`text-xs text-center ${isDarkMode ? "text-slate-400" : "text-slate-600"}`}>
-                  To register, first verify your Mobile Number or Email address.
+                  To register, please verify your Email address.
                 </p>
 
-                {/* Mobile Option */}
-                <button
-                  type="button"
-                  onClick={() => setIsPhoneModalOpen(true)}
-                  className="w-full py-3 rounded-2xl bg-gradient-to-r from-cyan-400 to-blue-500 text-slate-950 font-black text-xs shadow-lg hover:opacity-95 transition flex items-center justify-center gap-2"
-                >
-                  <FiPhone size={15} />
-                  <span>Verify Mobile Number (OTP)</span>
-                </button>
-
-                <div className="flex items-center my-1">
-                  <div className={`flex-grow border-t ${isDarkMode ? "border-slate-800" : "border-slate-200"}`} />
-                  <span className={`px-3 text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? "text-slate-500" : "text-slate-400"}`}>OR VERIFY EMAIL</span>
-                  <div className={`flex-grow border-t ${isDarkMode ? "border-slate-800" : "border-slate-200"}`} />
-                </div>
-
-                {/* Email Option */}
                 {!isEmailOtpSent ? (
-                  <form onSubmit={handleSendEmailOtp} className="flex flex-col gap-2.5">
-                    <div className={`flex items-center gap-2 px-3 py-2.5 rounded-2xl border ${isDarkMode ? "bg-[#1a1e29] border-slate-800" : "bg-slate-50 border-slate-300"}`}>
+                  <form onSubmit={handleSendEmailOtp} className="flex flex-col gap-3">
+                    <div className={`flex items-center gap-2 px-3.5 py-2.5 rounded-2xl border ${isDarkMode ? "bg-[#1a1e29] border-slate-800" : "bg-slate-50 border-slate-300"}`}>
                       <FiMail size={15} className="text-slate-400" />
                       <input
                         type="email"
@@ -479,25 +524,21 @@ const AuthPage = () => {
                     <button
                       type="submit"
                       disabled={loading}
-                      className={`w-full py-2.5 rounded-2xl border text-xs font-bold flex items-center justify-center gap-2 transition ${
-                        isDarkMode
-                          ? "bg-[#1a2333] hover:bg-[#222e42] border-slate-700 text-cyan-400"
-                          : "bg-slate-200 hover:bg-slate-300 border-slate-300 text-slate-900"
-                      }`}
+                      className="w-full py-3 rounded-2xl bg-cyan-400 text-slate-950 font-black text-xs hover:opacity-95 transition flex items-center justify-center gap-2 shadow-lg"
                     >
                       {loading ? "Sending OTP..." : "Send Verification OTP to Email"}
                     </button>
                   </form>
                 ) : (
-                  <form onSubmit={handleVerifyEmailOtp} className="flex flex-col gap-2.5">
-                    <div className={`flex items-center gap-2 px-3 py-2.5 rounded-2xl border ${isDarkMode ? "bg-[#1a1e29] border-slate-800" : "bg-slate-50 border-slate-300"}`}>
+                  <form onSubmit={handleVerifyEmailOtp} className="flex flex-col gap-3">
+                    <div className={`flex items-center gap-2 px-3.5 py-2.5 rounded-2xl border ${isDarkMode ? "bg-[#1a1e29] border-slate-800" : "bg-slate-50 border-slate-300"}`}>
                       <FiKey size={15} className="text-slate-400" />
                       <input
                         type="text"
                         maxLength={6}
                         value={emailOtp}
                         onChange={(e) => setEmailOtp(e.target.value)}
-                        placeholder="Enter 6-digit OTP sent to Email"
+                        placeholder="Enter 6-digit OTP"
                         className={`w-full bg-transparent text-xs text-center font-bold tracking-widest outline-none ${isDarkMode ? "text-white" : "text-slate-950"}`}
                         required
                       />
@@ -505,7 +546,7 @@ const AuthPage = () => {
                     <button
                       type="submit"
                       disabled={loading}
-                      className="w-full py-2.5 rounded-2xl bg-cyan-400 text-slate-950 font-black text-xs hover:opacity-95 transition flex items-center justify-center gap-2"
+                      className="w-full py-3 rounded-2xl bg-cyan-400 text-slate-950 font-black text-xs hover:opacity-95 transition flex items-center justify-center gap-2 shadow-lg"
                     >
                       {loading ? "Verifying..." : "Verify OTP & Continue"}
                     </button>
@@ -537,7 +578,7 @@ const AuthPage = () => {
                       type="text"
                       value={usernameInput}
                       onChange={(e) => setUsernameInput(e.target.value.toLowerCase().replace(/[^a-z0-9_.]/g, ""))}
-                      placeholder="e.g. johndoe"
+                      placeholder="Full Name"
                       className={`w-full bg-transparent text-xs font-bold outline-none ${isDarkMode ? "text-white" : "text-slate-950"}`}
                       autoFocus
                     />
@@ -599,39 +640,18 @@ const AuthPage = () => {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  <div className="flex flex-col gap-1">
-                    <label className={`text-xs font-bold ${isDarkMode ? "text-slate-300" : "text-slate-700"}`}>
-                      Mobile Number {verifiedContactType === "phone" && <span className="text-green-400 text-[10px]">(Verified)</span>}
-                    </label>
-                    <div className={`flex items-center gap-2 px-3 py-2 rounded-2xl border ${verifiedContactType === "phone" ? "bg-cyan-500/10 border-cyan-500/30" : isDarkMode ? "bg-[#1a1e29] border-slate-800" : "bg-slate-50 border-slate-300"}`}>
-                      <FiPhone size={13} className={verifiedContactType === "phone" ? "text-cyan-400" : "text-slate-400"} />
-                      <input
-                        type="tel"
-                        value={phoneNumber}
-                        readOnly={verifiedContactType === "phone"}
-                        onChange={(e) => setPhoneNumber(e.target.value)}
-                        placeholder="Mobile Number"
-                        className={`w-full bg-transparent text-xs outline-none font-medium ${verifiedContactType === "phone" ? "text-cyan-300 cursor-not-allowed" : isDarkMode ? "text-white" : "text-slate-950"}`}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col gap-1">
-                    <label className={`text-xs font-bold ${isDarkMode ? "text-slate-300" : "text-slate-700"}`}>
-                      Email ID {verifiedContactType === "email" && <span className="text-green-400 text-[10px]">(Verified)</span>}
-                    </label>
-                    <div className={`flex items-center gap-2 px-3 py-2 rounded-2xl border ${verifiedContactType === "email" ? "bg-cyan-500/10 border-cyan-500/30" : isDarkMode ? "bg-[#1a1e29] border-slate-800" : "bg-slate-50 border-slate-300"}`}>
-                      <FiMail size={13} className={verifiedContactType === "email" ? "text-cyan-400" : "text-slate-400"} />
-                      <input
-                        type="email"
-                        value={email}
-                        readOnly={verifiedContactType === "email"}
-                        onChange={(e) => setEmail(e.target.value)}
-                        placeholder="Email ID"
-                        className={`w-full bg-transparent text-xs outline-none font-medium ${verifiedContactType === "email" ? "text-cyan-300 cursor-not-allowed" : isDarkMode ? "text-white" : "text-slate-950"}`}
-                      />
-                    </div>
+                <div className="flex flex-col gap-1">
+                  <label className={`text-xs font-bold ${isDarkMode ? "text-slate-300" : "text-slate-700"}`}>
+                    Email ID <span className="text-green-400 text-[10px]">(Verified)</span>
+                  </label>
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-2xl border bg-cyan-500/10 border-cyan-500/30">
+                    <FiMail size={13} className="text-cyan-400" />
+                    <input
+                      type="email"
+                      value={email}
+                      readOnly
+                      className="w-full bg-transparent text-xs outline-none font-medium text-cyan-300 cursor-not-allowed"
+                    />
                   </div>
                 </div>
 
@@ -746,7 +766,7 @@ const AuthPage = () => {
               <form onSubmit={handleSendResetOtp} className="flex flex-col gap-4">
                 <div className="flex flex-col gap-1.5">
                   <label className={`text-xs font-bold ${isDarkMode ? "text-slate-300" : "text-slate-700"}`}>
-                    Account Username, Email, or Mobile <span className="text-red-500">*</span>
+                    Account Username or Email <span className="text-red-500">*</span>
                   </label>
                   <div className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-2xl border ${isDarkMode ? "bg-[#1a1e29] border-slate-800" : "bg-slate-50 border-slate-300"}`}>
                     <FiUser size={15} className="text-slate-400" />
@@ -754,7 +774,7 @@ const AuthPage = () => {
                       type="text"
                       value={forgotIdentifier}
                       onChange={(e) => setForgotIdentifier(e.target.value)}
-                      placeholder="Enter registered handle"
+                      placeholder="Enter registered username or email"
                       className={`w-full bg-transparent text-xs outline-none font-medium ${isDarkMode ? "text-white" : "text-slate-950"}`}
                       required
                     />
@@ -840,12 +860,136 @@ const AuthPage = () => {
         </div>
       </div>
 
-      {/* Firebase Phone OTP Modal */}
-      <PhoneOtpModal
-        isOpen={isPhoneModalOpen}
-        onClose={() => setIsPhoneModalOpen(false)}
-        onVerified={(cleanPhone) => handlePhoneVerified(cleanPhone)}
-      />
+      {/* GOOGLE MULTI-ACCOUNT SELECTOR POPUP MODAL */}
+      {googleModalData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className={`w-full max-w-md rounded-3xl p-6 shadow-2xl border ${isDarkMode ? "bg-[#12151c] border-slate-800 text-white" : "bg-white border-slate-200 text-slate-900"}`}>
+            <h3 className="text-lg font-black mb-2 text-center">Choose an Account</h3>
+            <p className={`text-xs text-center mb-5 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+              Multiple accounts are linked with <span className="font-bold text-cyan-400">{googleModalData.email}</span>. Select one to login or create a new account.
+            </p>
+
+            <div className="flex flex-col gap-3 max-h-64 overflow-y-auto mb-4 pr-1">
+              {googleModalData.accounts.map((acc) => (
+                <div key={acc._id} className={`flex items-center justify-between p-3 rounded-2xl border ${isDarkMode ? "bg-[#1a1e29] border-slate-800" : "bg-slate-50 border-slate-200"}`}>
+                  <div className="flex items-center gap-3">
+                    <img 
+                      src={acc.avatar || googleModalData.defaultAvatar || "https://api.dicebear.com/7.x/bottts/svg?seed=fallback"} 
+                      alt="Avatar" 
+                      className="w-10 h-10 rounded-full object-cover border border-cyan-400/40" 
+                    />
+                    <div>
+                      <h4 className="text-xs font-bold">{acc.fullName}</h4>
+                      <p className="text-[11px] text-cyan-400">@{acc.username}</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => handleSelectGoogleAccount(acc._id, googleModalData.credentialToken)}
+                    className="px-4 py-2 rounded-xl bg-cyan-400 text-slate-950 font-black text-xs shadow hover:opacity-90 transition"
+                  >
+                    Login
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex flex-col gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => {
+                  const email = googleModalData.email;
+                  const name = googleModalData.defaultName;
+                  const pic = googleModalData.defaultAvatar;
+                  setGoogleModalData(null);
+                  setGoogleEmailVerified(email);
+                  setGoogleNewFullName(name || "");
+                  setGoogleAvatarUrl(pic || "");
+                  const base = email.split("@")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
+                  setGoogleNewUsername(`${base}_${Math.floor(100 + Math.random() * 900)}`);
+                  setIsGoogleNewUserFlow(true);
+                }}
+                className={`w-full py-2.5 rounded-2xl border text-xs font-bold transition ${isDarkMode ? "border-cyan-500/40 text-cyan-400 hover:bg-cyan-500/10" : "border-cyan-500 text-cyan-600 hover:bg-cyan-50"}`}
+              >
+                + Create New Account with this Email
+              </button>
+              <button
+                type="button"
+                onClick={() => setGoogleModalData(null)}
+                className="w-full py-2 rounded-xl text-xs font-medium text-slate-500 hover:text-slate-300"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* GOOGLE NEW USER ONBOARDING MODAL */}
+      {isGoogleNewUserFlow && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className={`w-full max-w-md rounded-3xl p-6 shadow-2xl border ${isDarkMode ? "bg-[#12151c] border-slate-800 text-white" : "bg-white border-slate-200 text-slate-900"}`}>
+            <h3 className="text-lg font-black mb-1 text-center">Complete Your Profile</h3>
+            <p className={`text-xs text-center mb-4 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+              Set your username and password for <span className="font-bold text-cyan-400">{googleEmailVerified}</span>
+            </p>
+
+            <form onSubmit={handleGoogleNewAccountSubmit} className="flex flex-col gap-3.5">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-bold">Full Name</label>
+                <input
+                  type="text"
+                  value={googleNewFullName}
+                  onChange={(e) => setGoogleNewFullName(e.target.value)}
+                  className={`px-3 py-2.5 rounded-2xl border text-xs outline-none ${isDarkMode ? "bg-[#1a1e29] border-slate-800" : "bg-slate-50 border-slate-300"}`}
+                  required
+                />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-bold">Username</label>
+                <input
+                  type="text"
+                  value={googleNewUsername}
+                  onChange={(e) => setGoogleNewUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_.]/g, ""))}
+                  className={`px-3 py-2.5 rounded-2xl border text-xs outline-none ${isDarkMode ? "bg-[#1a1e29] border-slate-800" : "bg-slate-50 border-slate-300"}`}
+                  required
+                />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-bold">Password (for future manual login)</label>
+                <input
+                  type="password"
+                  value={googleNewPassword}
+                  onChange={(e) => setGoogleNewPassword(e.target.value)}
+                  placeholder="Min 6 characters"
+                  className={`px-3 py-2.5 rounded-2xl border text-xs outline-none ${isDarkMode ? "bg-[#1a1e29] border-slate-800" : "bg-slate-50 border-slate-300"}`}
+                  required
+                />
+              </div>
+
+              <div className="flex gap-2 mt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsGoogleNewUserFlow(false)}
+                  className="w-1/3 py-2.5 rounded-2xl border border-slate-700 text-xs font-bold text-slate-400"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-2/3 py-2.5 rounded-2xl bg-cyan-400 text-slate-950 font-black text-xs hover:opacity-95 transition"
+                >
+                  {loading ? "Creating..." : "Create Account & Login 🎉"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

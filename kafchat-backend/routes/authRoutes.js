@@ -2,11 +2,8 @@ const express = require("express");
 const router = express.Router();
 const {
   checkUsernameAvailability,
-  checkPhoneAccounts,
   register,
   loginWithPassword,
-  sendOtp,
-  verifyOtp,
   googleAuth,
   sendEmailOtp,
   verifyEmailOtp,
@@ -18,7 +15,7 @@ const {
   changePassword,
   updateProfile,
   setChatLockPin,
-  resetChatLockPin, // 👈 Added reset pin controller
+  resetChatLockPin,
   getMe,
   logout,
   getSessions,
@@ -35,13 +32,10 @@ router.post("/check-username", checkUsernameAvailability);
 router.post("/google", googleAuth);
 router.post("/send-email-otp", sendEmailOtp);
 router.post("/verify-email-otp", verifyEmailOtp);
-router.post("/check-phone", checkPhoneAccounts);
 router.post("/register", register);
 router.post("/complete-registration", register);
 router.post("/login", loginWithPassword);
 router.post("/login-with-password", loginWithPassword);
-router.post("/send-otp", sendOtp);
-router.post("/verify-otp", verifyOtp);
 router.post("/forgot-password-otp", sendForgotPasswordOtp);
 router.post("/reset-password-otp", resetPasswordWithOtp);
 
@@ -54,7 +48,7 @@ router.delete("/delete-account/:userId?", protect, deleteAccount);
 router.patch("/profile", protect, updateProfile);
 router.patch("/change-password", protect, changePassword);
 router.patch("/chat-lock-pin", protect, setChatLockPin);
-router.post("/reset-chat-lock-pin", protect, resetChatLockPin); // 👈 Added reset route handler
+router.post("/reset-chat-lock-pin", protect, resetChatLockPin);
 
 // VIP Activation Route
 router.post("/vip/activate", protect, activateVipPlan);

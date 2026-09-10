@@ -62,11 +62,11 @@ exports.checkUsernameAvailability = async (req, res) => {
   }
 };
 
-// @desc Google 1-Click Auth
+// @desc Google 1-Click Auth with Multi-Account Detection
 // @route POST /api/auth/google
 exports.googleAuth = async (req, res) => {
   try {
-    const { token, deviceId } = req.body;
+    const { token, deviceId, targetUserId } = req.body;
     if (!token) {
       return res.status(400).json({ success: false, message: "Google token is required" });
     }
@@ -79,88 +79,92 @@ exports.googleAuth = async (req, res) => {
     const payload = ticket.getPayload();
     const { email, name, picture } = payload;
     const cleanEmail = email.trim().toLowerCase();
-
-    let user = await User.findOne({ email: cleanEmail });
-
     const sessionId = crypto.randomBytes(16).toString("hex");
     const { browser, os, deviceName } = parseUserAgent(req.headers["user-agent"]);
 
-    if (!user) {
-      const baseUsername = cleanEmail.split("@")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
-      const uniqueUsername = `${baseUsername}_${Math.floor(100 + Math.random() * 900)}`;
+    // Agar user ne popup se koi specific existing account select kiya hai login ke liye
+    if (targetUserId) {
+      const selectedUser = await User.findOne({ _id: targetUserId, email: cleanEmail });
+      if (!selectedUser) {
+        return res.status(404).json({ success: false, message: "Selected account not found for this email" });
+      }
 
-      user = await User.create({
-        fullName: name || "KafChat User",
-        username: uniqueUsername,
-        email: cleanEmail,
-        phoneNumber: "",
-        phone: "",
-        password: crypto.randomBytes(16).toString("hex"),
-        avatar: picture || "",
-        profilePhotos: picture ? [{ url: picture, uploadedAt: new Date() }] : [],
-        isEmailVerified: true,
-        isPhoneVerified: false,
-        rootDeviceId: deviceId || sessionId,
-        sessions: [
-          {
-            sessionId,
-            deviceId: deviceId || sessionId,
-            deviceName,
-            browser,
-            os,
-            ip: req.ip || "",
-            isRoot: true,
-            lastActive: new Date(),
-          },
-        ],
-      });
-    } else {
-      if (!user.sessions) user.sessions = [];
-      if (user.sessions.length >= 10) user.sessions.shift();
+      if (!selectedUser.sessions) selectedUser.sessions = [];
+      if (selectedUser.sessions.length >= 10) selectedUser.sessions.shift();
 
-      user.sessions.push({
+      selectedUser.sessions.push({
         sessionId,
         deviceId: deviceId || sessionId,
         deviceName,
         browser,
         os,
         ip: req.ip || "",
-        isRoot: deviceId === user.rootDeviceId,
+        isRoot: deviceId === selectedUser.rootDeviceId,
         lastActive: new Date(),
       });
 
-      user.isOnline = true;
-      user.loginCount = (user.loginCount || 0) + 1;
-      user.lastLoginAt = new Date();
-      await user.save();
+      selectedUser.isOnline = true;
+      selectedUser.loginCount = (selectedUser.loginCount || 0) + 1;
+      selectedUser.lastLoginAt = new Date();
+      if (picture && !selectedUser.avatar) selectedUser.avatar = picture;
+      await selectedUser.save();
+
+      const appToken = generateToken(selectedUser._id, sessionId);
+
+      return res.status(200).json({
+        success: true,
+        token: appToken,
+        sessionId,
+        user: {
+          _id: selectedUser._id,
+          fullName: selectedUser.fullName,
+          username: selectedUser.username,
+          phoneNumber: selectedUser.phoneNumber,
+          email: selectedUser.email,
+          avatar: selectedUser.avatar,
+          avatarConfig: selectedUser.avatarConfig,
+          profilePhotos: selectedUser.profilePhotos,
+          avatarBitmojiFallback: selectedUser.avatarBitmojiFallback,
+          bio: selectedUser.bio,
+          gender: selectedUser.gender,
+          isVIP: selectedUser.isVIP,
+          hdUploadEnabled: selectedUser.hdUploadEnabled,
+          streakRecoveriesLeft: selectedUser.streakRecoveriesLeft,
+          streakPerks: selectedUser.streakPerks,
+          publicKey: selectedUser.publicKey,
+          lockPin: selectedUser.lockPin,
+        },
+      });
     }
 
-    const appToken = generateToken(user._id, sessionId);
+    // Us email se saare linked accounts dhoondo
+    const existingAccounts = await User.find({ email: cleanEmail }).select(
+      "fullName username email phoneNumber avatar profilePhotos isVIP lockPin"
+    );
 
+    // Case 1: Agar ek bhi account nahi hai, toh naya user flow trigger karo
+    if (!existingAccounts || existingAccounts.length === 0) {
+      return res.status(200).json({
+        success: true,
+        isNewUser: true,
+        email: cleanEmail,
+        defaultName: name || "",
+        defaultAvatar: picture || "",
+        message: "No accounts found. Please complete your registration.",
+      });
+    }
+
+    // Case 2: Agar accounts exist karte hain, toh accounts ki list return karo taaki frontend popup dikha sake
     return res.status(200).json({
       success: true,
-      token: appToken,
-      sessionId,
-      user: {
-        _id: user._id,
-        fullName: user.fullName,
-        username: user.username,
-        phoneNumber: user.phoneNumber,
-        email: user.email,
-        avatar: user.avatar,
-        avatarConfig: user.avatarConfig,
-        profilePhotos: user.profilePhotos,
-        avatarBitmojiFallback: user.avatarBitmojiFallback,
-        bio: user.bio,
-        gender: user.gender,
-        isVIP: user.isVIP,
-        hdUploadEnabled: user.hdUploadEnabled,
-        streakRecoveriesLeft: user.streakRecoveriesLeft,
-        streakPerks: user.streakPerks,
-        publicKey: user.publicKey,
-        lockPin: user.lockPin,
-      },
+      hasExistingAccounts: true,
+      accounts: existingAccounts,
+      email: cleanEmail,
+      defaultAvatar: picture || "",
+      defaultName: name || "",
+      message: "Multiple accounts found associated with this email.",
     });
+
   } catch (error) {
     console.error("Google Auth Error:", error);
     return res.status(400).json({ success: false, message: "Google verification failed" });
@@ -293,7 +297,7 @@ exports.checkPhoneAccounts = async (req, res) => {
   }
 };
 
-// @desc Register Profile
+// @desc Register Profile (Allows multiple accounts on the same email)
 // @route POST /api/auth/register
 exports.register = async (req, res) => {
   try {
@@ -332,10 +336,14 @@ exports.register = async (req, res) => {
 
     const cleanUsername = username.trim().toLowerCase();
 
+    // Username unique hona chahiye
     const usernameExists = await User.findOne({ username: cleanUsername });
     if (usernameExists) {
       return res.status(400).json({ success: false, message: "This username is already taken." });
     }
+
+    // NOTE: Yahan se "emailExists" wala restriction hata diya gaya hai 
+    // taaki ek hi email par multiple accounts (handles) asani se ban sakein!
 
     if (cleanPhone) {
       const existingOnPhone = await User.find({
@@ -347,13 +355,6 @@ exports.register = async (req, res) => {
           success: false,
           message: "Email ID is mandatory when creating more than one account on the same phone number.",
         });
-      }
-    }
-
-    if (cleanEmail) {
-      const emailExists = await User.findOne({ email: cleanEmail });
-      if (emailExists) {
-        return res.status(400).json({ success: false, message: "This email is already linked to another profile." });
       }
     }
 
@@ -976,7 +977,7 @@ exports.changePassword = async (req, res) => {
   }
 };
 
-// @desc Set / Update Chat Lock & Archive Vault PIN (100% User Defined)
+// @desc Set / Update Chat Lock & Archive Vault PIN
 // @route PATCH /api/auth/chat-lock-pin
 exports.setChatLockPin = async (req, res) => {
   try {
