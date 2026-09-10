@@ -1,12 +1,10 @@
 import axios from "axios";
 
-// Automatically detects hostname whether testing on localhost, network IP (192.168.x.x), or domain
-const currentHostname =
-  typeof window !== "undefined" && window.location.hostname
-    ? window.location.hostname
-    : "localhost";
-
-const API_BASE_URL = `http://${currentHostname}:5000/api`;
+// Render ka live backend URL yahan direct set kar diya hai production ke liye
+const API_BASE_URL = 
+  process.env.NODE_ENV === "production"
+    ? "https://kafchat-backend.onrender.com/api"
+    : `http://${typeof window !== "undefined" && window.location.hostname ? window.location.hostname : "localhost"}:5000/api`;
 
 const api = axios.create({
   baseURL: API_BASE_URL,

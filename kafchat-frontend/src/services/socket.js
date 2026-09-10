@@ -3,6 +3,10 @@ import { io } from "socket.io-client";
 let socket = null;
 
 const getSocketUrl = () => {
+  // Production mein Render ka URL use hoga, baaki jagah local
+  if (process.env.NODE_ENV === "production") {
+    return "https://kafchat-backend.onrender.com";
+  }
   if (typeof window !== "undefined" && window.location) {
     return `http://${window.location.hostname}:5000`;
   }
@@ -26,7 +30,6 @@ export const connectSocket = (token) => {
     withCredentials: true,
   });
 
-  // 👉 Is line ko yahan add kar dein taaki window.socket hamesha available rahe
   if (typeof window !== "undefined") {
     window.socket = socket;
   }
