@@ -57,8 +57,8 @@ import toast from "react-hot-toast";
 
 const SETTINGS_TOOLS = [
   {
-    id: "About Me",
-    label: "About Me",
+    id: "About Profile",
+    label: "About Profile",
     desc: "Basic account details, email, tier & membership date",
     icon: <FiInfo size={16} />,
   },
@@ -208,7 +208,7 @@ const ProfileModal = ({ onClose }) => {
 
   const isVip = Boolean(user?.isVIP);
 
-  const [activeTab, setActiveTab] = useState("About Me");
+  const [activeTab, setActiveTab] = useState("About Profile");
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [themeSubTab, setThemeSubTab] = useState("mode");
   const [showAvatarStudio, setShowAvatarStudio] = useState(false);
