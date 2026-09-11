@@ -151,6 +151,7 @@ exports.fetchChats = async (req, res) => {
         chatObj.isLocked = c.lockedBy?.some((id) => id && id.toString() === userId.toString()) || false;
         chatObj.isArchived = c.archivedBy?.some((id) => id && id.toString() === userId.toString()) || false;
         chatObj.isPinned = c.pinnedBy?.some((id) => id && id.toString() === userId.toString()) || false;
+        chatObj.isFavorite = c.favoriteBy?.some((id) => id && id.toString() === userId.toString()) || false;
 
         const userMute = c.mutedUsers?.find((m) => m.userId && m.userId.toString() === userId.toString());
         let isMuted = false;
@@ -195,7 +196,6 @@ exports.toggleLock = async (req, res) => {
       });
     }
 
-    // Clean comparison with user's stored PIN
     const userStoredPin = currentUser.lockPin.toString().replace(/^\$/, "").trim();
     const inputCleanPin = pin.toString().replace(/^\$/, "").trim();
 
@@ -488,7 +488,35 @@ exports.togglePinChat = async (req, res) => {
     else chat.pinnedBy.push(userId);
 
     await chat.save();
-    return res.status(200).json({ success: true, isPinned: !isPinned, message: !isPinned ? "Chat pinned" : "Chat unpinned" });
+    return res.status(200).json({ success: true, isPinned: !isPinned, message: !isPinned ? "Chat pinned 📌" : "Chat unpinned" });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc Toggle Favorite Chat (Star)
+// @route PATCH /api/chats/:chatId/favorite
+exports.toggleFavoriteChat = async (req, res) => {
+  try {
+    const chat = await Chat.findById(req.params.chatId);
+    if (!chat) return res.status(404).json({ success: false, message: "Chat not found" });
+
+    const userId = req.user._id;
+    if (!chat.favoriteBy) chat.favoriteBy = [];
+    const isFavorite = chat.favoriteBy.some((id) => id && id.toString() === userId.toString());
+
+    if (isFavorite) {
+      chat.favoriteBy = chat.favoriteBy.filter((id) => id && id.toString() !== userId.toString());
+    } else {
+      chat.favoriteBy.push(userId);
+    }
+
+    await chat.save();
+    return res.status(200).json({
+      success: true,
+      isFavorite: !isFavorite,
+      message: !isFavorite ? "Added to favorites ⭐" : "Removed from favorites",
+    });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }

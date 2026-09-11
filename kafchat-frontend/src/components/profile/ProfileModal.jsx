@@ -1703,18 +1703,33 @@ const ProfileModal = ({ onClose }) => {
                         <FiHardDrive className="theme-accent-text" /> Cloud Storage Quota
                       </span>
                       <span className="text-xs font-bold theme-text">
-                        {isVip ? "1.4 GB / 5.0 GB (PRO)" : "220 MB / 500 MB (Free)"}
+                        {(() => {
+                          const maxLimit = isVip ? 5.0 : 0.5; // PRO = 5GB, Free = 500MB (0.5GB)
+                          // Har post/reel/DP ko average 5MB man kar dynamic calculate kar rahe hain (ya user ke items ke hisab se)
+                          const totalItems = (userPosts?.length || 0) + (userReels?.length || 0) + (profilePhotos?.length || 0);
+                          const usedMb = totalItems * 5; // har item ka 5MB avg
+                          const usedFormatted = usedMb >= 1024 ? `${(usedMb / 1024).toFixed(1)} GB` : `${Math.max(usedMb, 12)} MB`;
+                          return `${usedFormatted} / ${maxLimit} GB (${isVip ? "PRO" : "Free"})`;
+                        })()}
                       </span>
                     </div>
 
                     <div className="w-full h-3 rounded-full bg-slate-800 overflow-hidden flex">
-                      <div className={`h-full ${isVip ? "w-[28%] bg-gradient-to-r from-amber-400 to-cyan-400" : "w-[44%] bg-cyan-400"}`} />
+                      <div 
+                        className={`h-full ${isVip ? "bg-gradient-to-r from-amber-400 to-cyan-400" : "bg-cyan-400"}`} 
+                        style={{ 
+                          width: `${Math.min(
+                            ((( (userPosts?.length || 0) + (userReels?.length || 0) + (profilePhotos?.length || 0) ) * 5) / (isVip ? 5120 : 500)) * 100, 
+                            100
+                          )}%` 
+                        }}
+                      />
                     </div>
 
                     <div className="flex items-center justify-between text-[10px] theme-text-muted pt-1">
-                      <span>Photos & Videos: {isVip ? "900 MB" : "150 MB"}</span>
-                      <span>Voice Notes: {isVip ? "320 MB" : "50 MB"}</span>
-                      <span>Docs: {isVip ? "180 MB" : "20 MB"}</span>
+                      <span>Posts & Reels: {((userPosts?.length || 0) + (userReels?.length || 0)) * 5} MB</span>
+                      <span>Profile DPs: {(profilePhotos?.length || 0) * 2} MB</span>
+                      <span>Limit: {isVip ? "5.0 GB" : "500 MB"}</span>
                     </div>
                   </div>
 

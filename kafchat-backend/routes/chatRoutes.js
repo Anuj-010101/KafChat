@@ -17,6 +17,7 @@ const {
   toggleAdmin,
   setDisappearingTimer,
   togglePinChat,
+  toggleFavoriteChat, // 👈 Added here
   toggleMute,
   toggleArchive,
   toggleLock,
@@ -44,6 +45,7 @@ router.patch("/group/admin", toggleAdmin);
 router.patch("/:chatId/disappearing", setDisappearingTimer);
 router.post("/:chatId/exit-cleanup", exitChatCleanup);
 router.patch("/:chatId/pin", togglePinChat);
+router.patch("/:chatId/favorite", toggleFavoriteChat); // 👈 Added favorite route here
 router.patch("/:chatId/mute", toggleMute);
 router.patch("/:chatId/archive", toggleArchive);
 

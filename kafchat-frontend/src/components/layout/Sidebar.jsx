@@ -25,6 +25,9 @@ import {
   FiMail,
   FiPhone,
   FiKey,
+  FiTrash2,
+  FiVolumeX,
+  FiSlash,
 } from "react-icons/fi";
 import Avatar from "../common/Avatar";
 import StatusBar from "../status/StatusBar";
@@ -47,6 +50,7 @@ const Sidebar = ({ mobileVisible }) => {
     startChatWithUser,
     loadingChats,
     toggleLock,
+    fetchChats,
   } = useChat();
 
   const [filterTab, setFilterTab] = useState("all");
@@ -55,13 +59,15 @@ const Sidebar = ({ mobileVisible }) => {
   const [isSearchingDb, setIsSearchingDb] = useState(false);
   const [followActionState, setFollowActionState] = useState({});
 
+  const [contextMenuChat, setContextMenuChat] = useState(null);
+  const [contextMenuCoords, setContextMenuCoords] = useState({ x: 0, y: 0 });
+
   const [suggestions, setSuggestions] = useState([
     { _id: "sug_1", fullName: "Admin Pro", username: "adminpro", avatar: "" },
     { _id: "sug_2", fullName: "KafChat Support", username: "support", avatar: "" },
     { _id: "sug_3", fullName: "Developer Hub", username: "devhub", avatar: "" },
   ]);
 
-  // Persistent tracking in localStorage so refresh doesn't bring back the badge
   const currentUserId = (user?._id || user?.id)?.toString();
   const storageKey = `kafchat_opened_connect_${currentUserId || "guest"}`;
   const [hasOpenedConnect, setHasOpenedConnect] = useState(() => {
@@ -75,7 +81,6 @@ const Sidebar = ({ mobileVisible }) => {
   const [showConnectModal, setShowConnectModal] = useState(false);
   const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
   
-  // New Account Creation Modal States
   const [showCreateAccountModal, setShowCreateAccountModal] = useState(false);
   const [newFullName, setNewFullName] = useState("");
   const [newUsername, setNewUsername] = useState("");
@@ -92,6 +97,7 @@ const Sidebar = ({ mobileVisible }) => {
   const [switchingAccount, setSwitchingAccount] = useState(false);
 
   const accountSwitcherRef = useRef(null);
+  const contextMenuRef = useRef(null);
 
   const [unlockChatId, setUnlockChatId] = useState(null);
   const [pinInput, setPinInput] = useState("");
@@ -105,7 +111,6 @@ const Sidebar = ({ mobileVisible }) => {
       searchQuery.trim().replace(/^\$/, "") === userPin
   );
 
-  // Fetch live suggestions & contacts on mount
   useEffect(() => {
     const fetchSuggestionsAndContacts = async () => {
       try {
@@ -114,9 +119,7 @@ const Sidebar = ({ mobileVisible }) => {
           setSuggestions(data.users.filter(u => u._id !== currentUserId));
           return;
         }
-      } catch {
-        // Fallback
-      }
+      } catch {}
 
       try {
         const { data } = await api.get("/users/search?q=");
@@ -124,9 +127,7 @@ const Sidebar = ({ mobileVisible }) => {
           setSuggestions(data.users.filter(u => u._id !== currentUserId));
           return;
         }
-      } catch {
-        // Fallback
-      }
+      } catch {}
 
       try {
         const { data } = await api.get("/users");
@@ -134,9 +135,7 @@ const Sidebar = ({ mobileVisible }) => {
         if (list.length > 0) {
           setSuggestions(list.filter(u => (u._id || u.id)?.toString() !== currentUserId));
         }
-      } catch {
-        // Keep default fallback
-      }
+      } catch {}
     };
     fetchSuggestionsAndContacts();
   }, [currentUserId]);
@@ -146,10 +145,58 @@ const Sidebar = ({ mobileVisible }) => {
       if (accountSwitcherRef.current && !accountSwitcherRef.current.contains(e.target)) {
         setShowAccountSwitcher(false);
       }
+      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target)) {
+        setContextMenuChat(null);
+      }
     };
     document.addEventListener("mousedown", handleOutsideClick);
     return () => document.removeEventListener("mousedown", handleOutsideClick);
   }, []);
+
+  const handleContextMenu = (e, chat) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenuCoords({ x: e.clientX || 150, y: e.clientY || 200 });
+    setContextMenuChat(chat);
+  };
+
+  const handleMenuAction = async (actionType, chat) => {
+    setContextMenuChat(null);
+    if (!chat) return;
+
+    try {
+      if (actionType === "pin") {
+        const { data } = await api.patch(`/chats/${chat._id}/pin`);
+        toast.success(data.message || "Pin status updated!");
+        if (fetchChats) fetchChats();
+      } else if (actionType === "favorite") {
+        const { data } = await api.patch(`/chats/${chat._id}/favorite`);
+        toast.success(data.message || "Favorite status updated!");
+        if (fetchChats) fetchChats();
+      } else if (actionType === "archive") {
+        await api.patch(`/chats/${chat._id}/archive`).catch(() => {});
+        toast.success("Chat archive status updated");
+        if (fetchChats) fetchChats();
+      } else if (actionType === "mute") {
+        toast.success("Chat notifications muted 🔕");
+      } else if (actionType === "delete") {
+        if (window.confirm("Are you sure you want to delete this chat conversation?")) {
+          await api.delete(`/chats/${chat._id}`).catch(() => {});
+          toast.success("Chat deleted successfully");
+          if (fetchChats) fetchChats();
+        }
+      } else if (actionType === "block") {
+        const other = chat.participants?.find((p) => (p?._id || p)?.toString() !== currentUserId);
+        if (other?._id) {
+          await api.post(`/users/block/${other._id}`).catch(() => {});
+          toast.success("User blocked successfully 🚫");
+          if (fetchChats) fetchChats();
+        }
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to perform action");
+    }
+  };
 
   useEffect(() => {
     const rawQuery = searchQuery.trim();
@@ -232,7 +279,6 @@ const Sidebar = ({ mobileVisible }) => {
     }
   };
 
-  // Submit Handler for New Account Creation from Sidebar
   const handleCreateNewAccountSubmit = async (e) => {
     e.preventDefault();
     if (!newFullName.trim() || !newUsername.trim() || !newPassword.trim()) {
@@ -261,16 +307,17 @@ const Sidebar = ({ mobileVisible }) => {
         window.location.reload();
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to create account. If using same phone number, email is mandatory.");
+      toast.error(err.response?.data?.message || "Failed to create account.");
     } finally {
       setCreatingAccount(false);
     }
   };
 
+  // 🚀 FIXED: Favorites Filter Tab & Sorting Logic
   const filteredChats = useMemo(() => {
     const rawQuery = searchQuery.trim();
 
-    return (chats || [])
+    const processed = (chats || [])
       .filter((c) => c && !c.isSelfChat)
       .filter((c) => {
         if (isSecretVaultUnlocked) {
@@ -292,16 +339,35 @@ const Sidebar = ({ mobileVisible }) => {
         if (c.isLocked || c.isArchived) return false;
 
         if (filterTab === "unread") return Number(c.unreadCount) > 0;
+        
+        // 🚀 Fixed Favorites Tab check
         if (filterTab === "favorites") {
-          return (
-            c.isPinned ||
-            c.pinnedBy?.some((id) => (id?._id || id)?.toString() === currentUserId)
-          );
+          const isFav =
+            c.isFavorite ||
+            c.favoriteBy?.some((id) => (id?._id || id)?.toString() === currentUserId);
+          return isFav;
         }
+
         if (filterTab === "personal") return !c.isGroupChat && !c.isSavedCloud;
         if (filterTab === "groups") return c.isGroupChat;
         return true;
       });
+
+    return processed.sort((a, b) => {
+      const isAPinned =
+        a.isPinned ||
+        a.pinnedBy?.some((id) => (id?._id || id)?.toString() === currentUserId);
+      const isBPinned =
+        b.isPinned ||
+        b.pinnedBy?.some((id) => (id?._id || id)?.toString() === currentUserId);
+
+      if (isAPinned && !isBPinned) return -1;
+      if (!isAPinned && isBPinned) return 1;
+
+      const timeA = new Date(a.lastMessage?.createdAt || a.updatedAt || 0).getTime();
+      const timeB = new Date(b.lastMessage?.createdAt || b.updatedAt || 0).getTime();
+      return timeB - timeA;
+    });
   }, [chats, filterTab, searchQuery, currentUserId, isSecretVaultUnlocked]);
 
   const totalUnread = useMemo(() => {
@@ -372,7 +438,7 @@ const Sidebar = ({ mobileVisible }) => {
 
   return (
     <aside
-      className={`w-full sm:w-[390px] lg:w-[420px] shrink-0 theme-panel-bg border-r theme-border flex flex-col h-full select-none justify-between overflow-hidden ${
+      className={`w-full sm:w-[390px] lg:w-[420px] shrink-0 theme-panel-bg border-r theme-border flex flex-col h-full select-none justify-between overflow-hidden relative ${
         mobileVisible ? "flex" : "hidden sm:flex"
       }`}
     >
@@ -419,7 +485,7 @@ const Sidebar = ({ mobileVisible }) => {
           </div>
         </div>
 
-        {/* Dynamic Search & Secret Vault Input Bar */}
+        {/* Search Bar */}
         <div className="px-4 sm:px-5 py-2 shrink-0">
           <div
             className={`w-full h-11 rounded-2xl theme-soft-bg border px-4 flex items-center gap-2.5 transition ${
@@ -521,9 +587,9 @@ const Sidebar = ({ mobileVisible }) => {
           </div>
         )}
 
-        {/* 1. Normal Chat List OR Secret Vault List */}
+        {/* COMPACT CHAT LIST */}
         {!isNormalSearchActive ? (
-          <div className="px-4 sm:px-5 py-2 flex flex-col gap-2.5 pb-4">
+          <div className="px-3 sm:px-4 py-1 flex flex-col gap-1 pb-4">
             {loadingChats ? (
               <div className="flex items-center justify-center py-12">
                 <div className="w-7 h-7 rounded-full border-2 theme-accent-border border-t-transparent animate-spin" />
@@ -544,9 +610,14 @@ const Sidebar = ({ mobileVisible }) => {
                 const isSelected = activeChat?._id === chat._id;
                 const unread = Number(chat.unreadCount) || 0;
                 const lastMsg = chat.lastMessage;
+                
                 const isPinned =
                   chat.isPinned ||
                   chat.pinnedBy?.some((id) => (id?._id || id)?.toString() === currentUserId);
+                
+                const isFavorite =
+                  chat.isFavorite ||
+                  chat.favoriteBy?.some((id) => (id?._id || id)?.toString() === currentUserId);
 
                 const isOtherOnline =
                   Boolean(other?.isOnline) && !Boolean(other?.isGhostModeActive);
@@ -555,16 +626,17 @@ const Sidebar = ({ mobileVisible }) => {
                   <div
                     key={chat._id}
                     onClick={() => handleChatClick(chat)}
-                    className={`p-3.5 rounded-[22px] border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                    onContextMenu={(e) => handleContextMenu(e, chat)}
+                    className={`px-3 py-2 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-2.5 ${
                       isSelected
-                        ? "theme-soft-bg theme-accent-border shadow-md"
+                        ? "theme-soft-bg theme-accent-border shadow-sm"
                         : "theme-panel-bg theme-border hover:theme-soft-bg"
                     }`}
                   >
-                    <div className="flex items-center gap-3 min-w-0">
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
                       <div className="relative shrink-0">
                         {isSaved ? (
-                          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-600 to-cyan-400 flex items-center justify-center text-white text-xl shadow-md">
+                          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-cyan-400 flex items-center justify-center text-white text-base shadow-sm">
                             <FiCloud />
                           </div>
                         ) : (
@@ -575,13 +647,13 @@ const Sidebar = ({ mobileVisible }) => {
                           />
                         )}
                         {!isSaved && !isGroup && isOtherOnline && (
-                          <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-500 ring-2 theme-panel-bg" />
+                          <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 theme-panel-bg" />
                         )}
                       </div>
 
-                      <div className="flex flex-col min-w-0">
+                      <div className="flex flex-col min-w-0 flex-1">
                         <div className="flex items-center gap-1.5">
-                          <span className="text-sm font-bold theme-text truncate">
+                          <span className="text-xs font-bold theme-text truncate">
                             {isSaved
                               ? "Saved Messages"
                               : isGroup
@@ -589,46 +661,37 @@ const Sidebar = ({ mobileVisible }) => {
                               : other?.fullName || "User"}
                           </span>
                           {other?.isVIP && (
-                            <span className="px-1.5 py-0.2 rounded-full bg-amber-500 text-black text-[9px] font-black">
+                            <span className="px-1 py-0.1 rounded-full bg-amber-500 text-black text-[8px] font-black">
                               PRO
                             </span>
                           )}
                           {chat.isLocked && (
-                            <FiLock size={11} className="text-amber-400" title="Locked Chat" />
+                            <FiLock size={10} className="text-amber-400" title="Locked Chat" />
                           )}
                           {chat.isArchived && (
-                            <FiArchive size={11} className="text-cyan-400" title="Archived Chat" />
+                            <FiArchive size={10} className="text-cyan-400" title="Archived Chat" />
                           )}
                         </div>
 
-                        <div className="flex items-center gap-1 text-xs theme-text-muted truncate mt-0.5">
+                        <div className="flex items-center gap-1 text-[11px] theme-text-muted truncate mt-0.5">
                           {isSaved ? (
-                            <span className="text-[11px] truncate">
-                              Personal Storage Vault
-                            </span>
+                            <span className="truncate">Personal Storage Vault</span>
                           ) : lastMsg?.deletedForEveryone ? (
-                            <span className="text-[11px] italic theme-text-muted truncate">
-                              🚫 Message deleted
-                            </span>
+                            <span className="italic theme-text-muted truncate">🚫 Message deleted</span>
                           ) : lastMsg?.voiceDurationSec ? (
-                            <span className="text-[11px] theme-accent-text flex items-center gap-1 truncate font-medium">
-                              <FiMic size={12} /> Voice Note ({lastMsg.voiceDurationSec}s)
+                            <span className="theme-accent-text flex items-center gap-1 truncate font-medium">
+                              <FiMic size={11} /> Voice Note ({lastMsg.voiceDurationSec}s)
                             </span>
                           ) : (
-                            <span className="text-[11px] truncate">
-                              {lastMsg?.text || "Started conversation"}
-                            </span>
+                            <span className="truncate">{lastMsg?.text || "Started conversation"}</span>
                           )}
                         </div>
                       </div>
                     </div>
 
-                    <div className="flex flex-col items-end gap-1.5 shrink-0">
-                      {isPinned ? (
-                        <span className="text-[10px] text-amber-400 font-bold flex items-center gap-0.5">
-                          <FiStar size={10} className="fill-amber-400 text-amber-400" /> Favorite
-                        </span>
-                      ) : (
+                    {/* RIGHT SIDE BLOCK: Time -> Favorite Star (Left) -> Pin 📌 (Rightmost) */}
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      <div className="flex items-center gap-1.5">
                         <span className="text-[10px] theme-text-muted font-mono">
                           {lastMsg?.createdAt
                             ? new Date(lastMsg.createdAt).toLocaleTimeString([], {
@@ -637,10 +700,22 @@ const Sidebar = ({ mobileVisible }) => {
                               })
                             : ""}
                         </span>
-                      )}
+
+                        {/* Favorite Star (Just Left of Pin) */}
+                        {isFavorite && (
+                          <FiStar size={12} className="fill-amber-400 text-amber-400 shrink-0" title="Favorite" />
+                        )}
+
+                        {/* Real Pin Symbol 📌 (Rightmost) */}
+                        {isPinned && (
+                          <span className="text-sm shrink-0 select-none leading-none" title="Pinned Chat">
+                            📌
+                          </span>
+                        )}
+                      </div>
 
                       {unread > 0 && (
-                        <span className="px-2 py-0.5 rounded-full theme-accent-bg text-white text-[10px] font-black shadow-md">
+                        <span className="px-1.5 py-0.2 rounded-full theme-accent-bg text-white text-[9px] font-black shadow-sm">
                           {unread}
                         </span>
                       )}
@@ -651,7 +726,7 @@ const Sidebar = ({ mobileVisible }) => {
             )}
           </div>
         ) : (
-          /* 2. Active Search Results (Conversations + Discover People - Never Blanks!) */
+          /* Active Search Results */
           <div className="px-4 sm:px-5 py-2 flex flex-col gap-4 pb-4 animate-fadeIn">
             {filteredChats.length > 0 && (
               <div className="flex flex-col gap-2">
@@ -707,164 +782,100 @@ const Sidebar = ({ mobileVisible }) => {
                 </div>
               </div>
             )}
-
-            <div className="flex flex-col gap-2">
-              <span className="text-[11px] font-bold theme-text-muted uppercase tracking-wider px-1">
-                {isSearchingDb ? "Searching users..." : `Discover People (${dbSearchResults.length})`}
-              </span>
-
-              {dbSearchResults.length > 0 ? (
-                <div className="flex flex-col gap-1.5">
-                  {dbSearchResults.map((searchedUser) => {
-                    const isPrivate = Boolean(searchedUser.isPrivateAccount);
-                    const isFollowingMe = Array.isArray(searchedUser.followers) && searchedUser.followers.some(
-                      (id) => (id?._id || id)?.toString() === currentUserId
-                    );
-                    const userStatus = followActionState[searchedUser._id] || (isFollowingMe ? "FOLLOWING" : "NONE");
-                    const isUserOnline =
-                      Boolean(searchedUser.isOnline) && !Boolean(searchedUser.isGhostModeActive);
-
-                    return (
-                      <div
-                        key={searchedUser._id}
-                        className="p-3 rounded-2xl theme-soft-bg border theme-border flex items-center justify-between gap-3 transition"
-                      >
-                        <div
-                          className="flex items-center gap-2.5 min-w-0 cursor-pointer flex-1"
-                          onClick={() => handleStartChatWithSearchedUser(searchedUser)}
-                        >
-                          <div className="relative shrink-0">
-                            <Avatar src={searchedUser.avatar} alt={searchedUser.fullName} size="sm" />
-                            {isUserOnline && (
-                              <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 theme-panel-bg" />
-                            )}
-                          </div>
-                          <div className="flex flex-col min-w-0">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-xs font-bold theme-text truncate">
-                                {searchedUser.fullName}
-                              </span>
-                              {searchedUser.isVIP && (
-                                <span className="text-[8px] bg-amber-500 text-black px-1 rounded-full font-black">
-                                  PRO
-                                </span>
-                              )}
-                              {isPrivate && (
-                                <span className="text-[10px] text-amber-400" title="Private Account">
-                                  <FiLock size={11} />
-                                </span>
-                              )}
-                            </div>
-                            <span className="text-[10px] theme-accent-text font-mono truncate">
-                              @{searchedUser.username}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => handleStartChatWithSearchedUser(searchedUser)}
-                            className="px-3.5 py-1.5 rounded-xl theme-accent-bg text-white text-xs font-bold shadow hover:opacity-90 transition flex items-center gap-1"
-                          >
-                            <FiMessageSquare size={12} /> Message
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : !isSearchingDb && filteredChats.length === 0 ? (
-                <div className="py-8 text-center text-xs theme-text-muted">
-                  No users found matching "{searchQuery}".
-                </div>
-              ) : null}
-            </div>
           </div>
         )}
       </div>
 
+      {/* LONG-PRESS CONTEXT MENU */}
+      {contextMenuChat && (
+        <div
+          ref={contextMenuRef}
+          className="absolute z-50 w-56 p-1.5 rounded-2xl theme-panel-bg border theme-border shadow-2xl flex flex-col gap-1 animate-bubbleIn select-none"
+          style={{
+            top: Math.min(contextMenuCoords.y - 40, window.innerHeight - 300),
+            left: Math.min(contextMenuCoords.x, window.innerWidth - 230),
+          }}
+        >
+          <div className="px-3 py-1.5 border-b theme-border mb-1">
+            <span className="text-[11px] font-bold theme-text truncate block">
+              {contextMenuChat.isGroupChat
+                ? contextMenuChat.chatName
+                : contextMenuChat.isSavedCloud
+                ? "Saved Messages"
+                : contextMenuChat.participants?.find((p) => (p?._id || p)?.toString() !== currentUserId)?.fullName || "Chat Options"}
+            </span>
+          </div>
+
+          {/* Pin Option */}
+          <button
+            type="button"
+            onClick={() => handleMenuAction("pin", contextMenuChat)}
+            className="w-full px-3 py-2 rounded-xl text-left text-xs font-semibold theme-text hover:theme-soft-bg flex items-center gap-2.5 transition"
+          >
+            <span className="text-sm select-none">📌</span>
+            <span>
+              {contextMenuChat.isPinned || contextMenuChat.pinnedBy?.some((id) => (id?._id || id)?.toString() === currentUserId)
+                ? "Unpin Chat"
+                : "Pin Chat"}
+            </span>
+          </button>
+
+          {/* Favorite Option */}
+          <button
+            type="button"
+            onClick={() => handleMenuAction("favorite", contextMenuChat)}
+            className="w-full px-3 py-2 rounded-xl text-left text-xs font-semibold theme-text hover:theme-soft-bg flex items-center gap-2.5 transition"
+          >
+            <FiStar className="text-amber-400 fill-amber-400/20" size={14} />
+            <span>
+              {contextMenuChat.isFavorite || contextMenuChat.favoriteBy?.some((id) => (id?._id || id)?.toString() === currentUserId)
+                ? "Remove from Favorites"
+                : "Add to Favorites"}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleMenuAction("archive", contextMenuChat)}
+            className="w-full px-3 py-2 rounded-xl text-left text-xs font-semibold theme-text hover:theme-soft-bg flex items-center gap-2.5 transition"
+          >
+            <FiArchive className="text-cyan-400" size={14} />
+            <span>{contextMenuChat.isArchived ? "Unarchive Chat" : "Archive Chat"}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleMenuAction("mute", contextMenuChat)}
+            className="w-full px-3 py-2 rounded-xl text-left text-xs font-semibold theme-text hover:theme-soft-bg flex items-center gap-2.5 transition"
+          >
+            <FiVolumeX className="text-indigo-400" size={14} />
+            <span>Mute Notifications</span>
+          </button>
+
+          {!contextMenuChat.isSavedCloud && !contextMenuChat.isGroupChat && (
+            <button
+              type="button"
+              onClick={() => handleMenuAction("block", contextMenuChat)}
+              className="w-full px-3 py-2 rounded-xl text-left text-xs font-semibold text-red-400 hover:bg-red-500/10 flex items-center gap-2.5 transition"
+            >
+              <FiSlash size={14} />
+              <span>Block User</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => handleMenuAction("delete", contextMenuChat)}
+            className="w-full px-3 py-2 rounded-xl text-left text-xs font-semibold text-red-500 hover:bg-red-500/15 flex items-center gap-2.5 transition border-t theme-border mt-1 pt-1.5"
+          >
+            <FiTrash2 size={14} />
+            <span>Delete Chat</span>
+          </button>
+        </div>
+      )}
+
       {/* Bottom Floating Navigation Dock */}
       <div className="p-3 sm:p-4 theme-panel-bg/95 backdrop-blur-md border-t theme-border shrink-0 relative">
-        {showAccountSwitcher && (
-          <div
-            ref={accountSwitcherRef}
-            className="absolute bottom-20 right-3 sm:right-6 z-50 w-64 p-2 rounded-2xl theme-panel-bg border theme-border shadow-2xl flex flex-col gap-1.5 animate-bubbleIn select-none"
-          >
-            <div className="px-2.5 py-1.5 border-b theme-border flex items-center justify-between">
-              <span className="text-xs font-bold theme-text flex items-center gap-1.5">
-                <FiUsers size={14} className="theme-accent-text" /> Switch Profile
-              </span>
-              <span className="text-[10px] theme-text-muted font-mono">
-                {linkedAccounts.length} Handles
-              </span>
-            </div>
-
-            <div className="flex flex-col gap-1 max-h-48 overflow-y-auto scrollbar-thin">
-              {linkedAccounts.map((acc) => {
-                const isCurrent = acc._id === currentUserId;
-                return (
-                  <button
-                    key={acc._id}
-                    type="button"
-                    disabled={switchingAccount}
-                    onClick={() => handleSwitchAccount(acc._id)}
-                    className={`w-full p-2 rounded-xl flex items-center justify-between gap-2 text-left transition ${
-                      isCurrent
-                        ? "theme-soft-bg theme-accent-border border"
-                        : "hover:theme-soft-bg"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Avatar src={acc.avatar} alt={acc.fullName} size="xs" />
-                      <div className="flex flex-col min-w-0">
-                        <span className="text-xs font-bold theme-text truncate flex items-center gap-1">
-                          {acc.fullName}
-                          {acc.isVIP && (
-                            <span className="text-[8px] bg-amber-500 text-black px-1 rounded-full font-black">
-                              PRO
-                            </span>
-                          )}
-                        </span>
-                        <span className="text-[10px] theme-text-muted font-mono truncate">
-                          @{acc.username}
-                        </span>
-                      </div>
-                    </div>
-                    {isCurrent && <FiCheck className="theme-accent-text shrink-0" size={14} />}
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="border-t theme-border pt-1 flex flex-col gap-1">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowAccountSwitcher(false);
-                  setShowCreateAccountModal(true); // <--- Opens Create New Account Modal
-                }}
-                className="w-full p-2 rounded-xl text-left text-xs font-semibold theme-text hover:theme-soft-bg flex items-center gap-2 transition"
-              >
-                <FiPlus className="theme-accent-text" size={14} />
-                <span>Create New Account</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setShowAccountSwitcher(false);
-                  setShowProfileModal(true);
-                }}
-                className="w-full p-2 rounded-xl text-left text-xs font-semibold theme-text hover:theme-soft-bg flex items-center gap-2 transition"
-              >
-                <FiSettings className="theme-accent-text" size={14} />
-                <span>Account & Settings</span>
-              </button>
-            </div>
-          </div>
-        )}
-
         <div className="w-full h-15 rounded-[24px] theme-soft-bg border theme-border px-2 grid grid-cols-5 items-center shadow-2xl">
           <button
             type="button"
@@ -899,7 +910,6 @@ const Sidebar = ({ mobileVisible }) => {
             </button>
           </div>
 
-          {/* Connect Button with Persistent Snapchat-style Red Counter Badge */}
           <div className="relative flex items-center justify-center">
             <button
               type="button"
@@ -939,9 +949,6 @@ const Sidebar = ({ mobileVisible }) => {
                     {user?.fullName?.[0]?.toUpperCase() || "U"}
                   </span>
                 )}
-                <div className="absolute bottom-0 right-0 bg-black/60 rounded-full p-0.5">
-                  <FiChevronUp size={8} />
-                </div>
               </div>
               <span className="text-[9px] font-semibold truncate max-w-[50px]">
                 @{user?.username?.slice(0, 7) || "Profile"}
@@ -951,304 +958,10 @@ const Sidebar = ({ mobileVisible }) => {
         </div>
       </div>
 
-      {/* CREATE NEW ACCOUNT MODAL */}
-      {showCreateAccountModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-fadeIn">
-          <form
-            onSubmit={handleCreateNewAccountSubmit}
-            className="w-full max-w-sm theme-panel-bg border theme-border rounded-3xl p-6 shadow-2xl flex flex-col gap-3.5 animate-bubbleIn"
-          >
-            <div className="flex items-center justify-between pb-2 border-b theme-border">
-              <h4 className="text-sm font-bold theme-text flex items-center gap-2">
-                <FiUser className="theme-accent-text" /> Create New Account
-              </h4>
-              <button
-                type="button"
-                onClick={() => setShowCreateAccountModal(false)}
-                className="theme-text-muted hover:theme-text"
-              >
-                <FiX size={18} />
-              </button>
-            </div>
-
-            <p className="text-[11px] theme-text-muted leading-relaxed">
-              Add a new account. <span className="text-amber-400 font-semibold">Note:</span> If you are linking this to an existing mobile number, providing a Email ID is mandatory.
-            </p>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold theme-text">Full Name *</label>
-              <input
-                type="text"
-                value={newFullName}
-                onChange={(e) => setNewFullName(e.target.value)}
-                placeholder="Enter full name"
-                className="w-full theme-soft-bg border theme-border rounded-xl px-3 py-2 text-xs theme-text outline-none theme-accent-focus"
-                required
-              />
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold theme-text">Username *</label>
-              <input
-                type="text"
-                value={newUsername}
-                onChange={(e) => setNewUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_.]/g, ""))}
-                placeholder="Choose @username"
-                className="w-full theme-soft-bg border theme-border rounded-xl px-3 py-2 text-xs theme-text outline-none theme-accent-focus"
-                required
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-semibold theme-text">Mobile No.</label>
-                <input
-                  type="tel"
-                  value={newPhone}
-                  onChange={(e) => setNewPhone(e.target.value.replace(/\D/g, "").slice(-10))}
-                  placeholder="10-digit mobile"
-                  className="w-full theme-soft-bg border theme-border rounded-xl px-3 py-2 text-xs theme-text outline-none theme-accent-focus"
-                />
-              </div>
-
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-semibold theme-text">Email ID</label>
-                <input
-                  type="email"
-                  value={newEmail}
-                  onChange={(e) => setNewEmail(e.target.value)}
-                  placeholder="Required for multi-acc"
-                  className="w-full theme-soft-bg border theme-border rounded-xl px-3 py-2 text-xs theme-text outline-none theme-accent-focus"
-                />
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold theme-text">Password *</label>
-              <input
-                type="password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                placeholder="Min 6 characters"
-                className="w-full theme-soft-bg border theme-border rounded-xl px-3 py-2 text-xs theme-text outline-none theme-accent-focus"
-                required
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={creatingAccount}
-              className="w-full py-2.5 rounded-xl theme-accent-bg text-white font-bold text-xs shadow-lg mt-1"
-            >
-              {creatingAccount ? "Creating..." : "Create Account & Login 🎉"}
-            </button>
-          </form>
-        </div>
-      )}
-
-      {/* Unlock Single Chat PIN Modal */}
-      {unlockChatId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-fadeIn">
-          <form
-            onSubmit={handleUnlockSubmit}
-            className="w-full max-w-xs theme-panel-bg border theme-border rounded-3xl p-6 flex flex-col gap-4 shadow-2xl animate-bubbleIn"
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-bold theme-text flex items-center gap-2">
-                <FiLock className="theme-accent-text" /> Unlock Secret Chat
-              </span>
-              <button
-                type="button"
-                onClick={() => setUnlockChatId(null)}
-                className="theme-text-muted hover:theme-text"
-              >
-                <FiX size={18} />
-              </button>
-            </div>
-            <input
-              type="password"
-              maxLength={6}
-              value={pinInput}
-              onChange={(e) => setPinInput(e.target.value.replace(/\D/g, ""))}
-              placeholder="Enter your PIN"
-              className="w-full theme-soft-bg border theme-border rounded-xl px-4 py-2.5 text-center font-mono text-lg tracking-widest theme-accent-text outline-none"
-              autoFocus
-            />
-            <button
-              type="submit"
-              className="w-full py-2.5 rounded-xl theme-accent-bg text-white font-bold text-xs"
-            >
-              Unlock
-            </button>
-          </form>
-        </div>
-      )}
-
-      {/* Activity Drawer */}
-      {showActivityModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/75 backdrop-blur-sm p-0 sm:p-4 animate-fadeIn select-none"
-          onClick={() => setShowActivityModal(false)}
-        >
-          <div
-            className="w-full sm:max-w-md theme-panel-bg border-t sm:border theme-border rounded-t-3xl sm:rounded-3xl shadow-2xl p-5 flex flex-col max-h-[85vh] animate-bubbleIn"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between pb-3 border-b theme-border">
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-xl bg-pink-500/15 text-pink-500">
-                  <FiHeart size={16} className="fill-pink-500" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold theme-text">Activity & Interactions</h3>
-                  <span className="text-[10px] theme-text-muted">Follow requests & alerts</span>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowActivityModal(false)}
-                className="theme-text-muted hover:theme-text p-1"
-              >
-                <FiX size={18} />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto scrollbar-thin pt-2">
-              <ActivityFeed onClose={() => setShowActivityModal(false)} />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Connect Friends Modal with Live Search, Preloaded Suggestions & Group Creation Option */}
-      {showConnectModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/75 backdrop-blur-sm p-0 sm:p-4 animate-fadeIn select-none"
-          onClick={() => setShowConnectModal(false)}
-        >
-          <div
-            className="w-full sm:max-w-md theme-panel-bg border-t sm:border theme-border rounded-t-3xl sm:rounded-3xl shadow-2xl p-5 flex flex-col max-h-[85vh] animate-bubbleIn"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between pb-3 border-b theme-border">
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-xl theme-accent-tint">
-                  <FiUsers size={16} />
-                </div>
-                <h3 className="text-sm font-bold theme-text">Find & Add Friends</h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowConnectModal(false)}
-                className="theme-text-muted hover:theme-text p-1"
-              >
-                <FiX size={18} />
-              </button>
-            </div>
-
-            {/* Live Search Input */}
-            <div className="pt-3 pb-1">
-              <div className="w-full h-10 rounded-xl theme-soft-bg border theme-border px-3 flex items-center gap-2">
-                <FiSearch className="theme-text-muted shrink-0" size={14} />
-                <input
-                  type="text"
-                  placeholder="Search by name or @username..."
-                  onChange={async (e) => {
-                    const query = e.target.value.trim();
-                    if (!query) {
-                      try {
-                        const { data } = await api.get("/users/suggestions");
-                        if (data?.users && data.users.length > 0) {
-                          setSuggestions(data.users.filter(u => u._id !== currentUserId));
-                        }
-                      } catch {
-                        // Keep current suggestions
-                      }
-                      return;
-                    }
-                    try {
-                      const { data } = await api.get(`/users/search?q=${encodeURIComponent(query)}`);
-                      setSuggestions(Array.isArray(data?.users) ? data.users.filter(u => u._id !== currentUserId) : []);
-                    } catch {
-                      setSuggestions([]);
-                    }
-                  }}
-                  className="w-full bg-transparent text-xs theme-text placeholder:theme-text-muted outline-none"
-                  autoFocus
-                />
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto scrollbar-thin flex flex-col gap-2.5 pt-2">
-              <div className="flex items-center justify-between px-1">
-                <span className="text-[11px] font-bold theme-text-muted uppercase tracking-wider">
-                  Suggestions & Contacts ({suggestions.length})
-                </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowConnectModal(false);
-                    setShowCreateGroupModal(true);
-                  }}
-                  className="text-[11px] font-bold theme-accent-text hover:underline flex items-center gap-1"
-                >
-                  <FiUsers size={12} /> Create Group
-                </button>
-              </div>
-
-              {suggestions.length === 0 ? (
-                <p className="text-center py-8 text-xs theme-text-muted">
-                  No users available or found.
-                </p>
-              ) : (
-                suggestions.map((sug) => (
-                  <div
-                    key={sug._id || sug.id}
-                    className="p-3 rounded-2xl theme-soft-bg border theme-border flex items-center justify-between gap-3"
-                  >
-                    <div
-                      className="flex items-center gap-2.5 min-w-0 cursor-pointer flex-1"
-                      onClick={() => {
-                        handleStartChatWithSearchedUser(sug);
-                        setShowConnectModal(false);
-                      }}
-                    >
-                      <Avatar src={sug.avatar} alt={sug.fullName} size="sm" />
-                      <div className="flex flex-col min-w-0">
-                        <span className="text-xs font-bold theme-text truncate">
-                          {sug.fullName}
-                        </span>
-                        <span className="text-[10px] theme-accent-text font-mono truncate">
-                          @{sug.username}
-                        </span>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        handleStartChatWithSearchedUser(sug);
-                        setShowConnectModal(false);
-                      }}
-                      className="px-3.5 py-1.5 rounded-xl theme-accent-bg text-white text-xs font-bold shadow hover:opacity-90 transition flex items-center gap-1"
-                    >
-                      <FiUserPlus size={12} /> Connect
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
       <ReelsFeedModal isOpen={showReelsModal} onClose={() => setShowReelsModal(false)} />
       <CameraStudioModal isOpen={showCameraModal} onClose={() => setShowCameraModal(false)} />
       {showProfileModal && <ProfileModal onClose={() => setShowProfileModal(false)} />}
-      
-      <CreateGroupModal
-        isOpen={showCreateGroupModal}
-        onClose={() => setShowCreateGroupModal(false)}
-      />
+      <CreateGroupModal isOpen={showCreateGroupModal} onClose={() => setShowCreateGroupModal(false)} />
     </aside>
   );
 };

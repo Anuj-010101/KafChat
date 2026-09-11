@@ -23,17 +23,19 @@ const chatSchema = new mongoose.Schema(
     requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
 
     // WhatsApp + Snap Disappearing Modes:
-    // 'off', 'after_view' (Snapchat style), '24h', '7d', '90d'
     disappearingTimer: {
       type: String,
       enum: ["off", "after_view", "24h", "7d", "90d"],
       default: "off",
     },
     disappearingChangedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-    disappearingActivatedAt: { type: Date, default: null }, // Anchor timestamp
+    disappearingActivatedAt: { type: Date, default: null },
 
     // WhatsApp Style Pinned Chats (Per user)
     pinnedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+
+    // 🚀 Added Favorite/Star System (Per user)
+    favoriteBy: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
 
     mutedUsers: [
       {

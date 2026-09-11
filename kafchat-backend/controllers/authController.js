@@ -82,7 +82,6 @@ exports.googleAuth = async (req, res) => {
     const sessionId = crypto.randomBytes(16).toString("hex");
     const { browser, os, deviceName } = parseUserAgent(req.headers["user-agent"]);
 
-    // Agar user ne popup se koi specific existing account select kiya hai login ke liye
     if (targetUserId) {
       const selectedUser = await User.findOne({ _id: targetUserId, email: cleanEmail });
       if (!selectedUser) {
@@ -137,12 +136,10 @@ exports.googleAuth = async (req, res) => {
       });
     }
 
-    // Us email se saare linked accounts dhoondo
     const existingAccounts = await User.find({ email: cleanEmail }).select(
       "fullName username email phoneNumber avatar profilePhotos isVIP lockPin"
     );
 
-    // Case 1: Agar ek bhi account nahi hai, toh naya user flow trigger karo
     if (!existingAccounts || existingAccounts.length === 0) {
       return res.status(200).json({
         success: true,
@@ -154,7 +151,6 @@ exports.googleAuth = async (req, res) => {
       });
     }
 
-    // Case 2: Agar accounts exist karte hain, toh accounts ki list return karo taaki frontend popup dikha sake
     return res.status(200).json({
       success: true,
       hasExistingAccounts: true,
@@ -171,7 +167,7 @@ exports.googleAuth = async (req, res) => {
   }
 };
 
-// @desc Send Email OTP
+// @desc Send Email OTP (Non-blocking background delivery)
 // @route POST /api/auth/send-email-otp
 exports.sendEmailOtp = async (req, res) => {
   try {
@@ -199,8 +195,13 @@ exports.sendEmailOtp = async (req, res) => {
     user.otpExpires = otpExpires;
     await user.save();
 
+    // 🚀 Non-blocking immediate response + background email dispatch
     if (typeof sendOtpEmail === "function") {
-      await sendOtpEmail(cleanEmail, otp).catch(() => {});
+      setImmediate(() => {
+        sendOtpEmail(cleanEmail, otp).catch((err) => {
+          console.error("Background Email OTP Send Error:", err);
+        });
+      });
     }
 
     return res.status(200).json({
@@ -297,7 +298,7 @@ exports.checkPhoneAccounts = async (req, res) => {
   }
 };
 
-// @desc Register Profile (Allows multiple accounts on the same email)
+// @desc Register Profile
 // @route POST /api/auth/register
 exports.register = async (req, res) => {
   try {
@@ -336,14 +337,10 @@ exports.register = async (req, res) => {
 
     const cleanUsername = username.trim().toLowerCase();
 
-    // Username unique hona chahiye
     const usernameExists = await User.findOne({ username: cleanUsername });
     if (usernameExists) {
       return res.status(400).json({ success: false, message: "This username is already taken." });
     }
-
-    // NOTE: Yahan se "emailExists" wala restriction hata diya gaya hai 
-    // taaki ek hi email par multiple accounts (handles) asani se ban sakein!
 
     if (cleanPhone) {
       const existingOnPhone = await User.find({
@@ -1126,7 +1123,7 @@ exports.logout = async (req, res) => {
   }
 };
 
-// @desc Send Forgot Password OTP
+// @desc Send Forgot Password OTP (Non-blocking background delivery)
 // @route POST /api/auth/forgot-password-otp
 exports.sendForgotPasswordOtp = async (req, res) => {
   try {
@@ -1161,8 +1158,13 @@ exports.sendForgotPasswordOtp = async (req, res) => {
     user.otpExpires = new Date(Date.now() + 10 * 60 * 1000);
     await user.save();
 
+    // 🚀 Non-blocking immediate response + background email dispatch
     if (typeof sendOtpEmail === "function") {
-      await sendOtpEmail(user.email, otp).catch(() => {});
+      setImmediate(() => {
+        sendOtpEmail(user.email, otp).catch((err) => {
+          console.error("Background Reset OTP Send Error:", err);
+        });
+      });
     }
 
     return res.status(200).json({

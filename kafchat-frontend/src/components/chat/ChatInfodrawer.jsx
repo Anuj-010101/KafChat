@@ -32,6 +32,8 @@ import {
   FiUsers,
   FiMessageSquare,
   FiGrid,
+  FiBookmark,
+  FiStar,
 } from "react-icons/fi";
 import Avatar from "../common/Avatar";
 import DualProfileBanner from "../common/DualProfileBanner";
@@ -90,6 +92,9 @@ const ChatInfoDrawer = ({ isOpen, onClose, messages, onStartCall }) => {
   // Privacy & Lifecycle Controls
   const [disappearingTime, setDisappearingTime] = useState(activeChat?.disappearingTimer || "off");
   const [isArchived, setIsArchived] = useState(Boolean(activeChat?.isArchived));
+  const [isPinned, setIsPinned] = useState(false);
+  const [isFavorite, setIsFavorite] = useState(false);
+
   const [showDisappearModal, setShowDisappearModal] = useState(false);
   const [showWallpaperModal, setShowWallpaperModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
@@ -123,6 +128,16 @@ const ChatInfoDrawer = ({ isOpen, onClose, messages, onStartCall }) => {
       setIsArchived(Boolean(activeChat.isArchived));
 
       const currentUserId = (user?._id || user?.id)?.toString();
+      const pinnedStatus =
+        activeChat.isPinned ||
+        activeChat.pinnedBy?.some((id) => (id?._id || id)?.toString() === currentUserId);
+      setIsPinned(Boolean(pinnedStatus));
+
+      const favoriteStatus =
+        activeChat.isFavorite ||
+        activeChat.favoriteBy?.some((id) => (id?._id || id)?.toString() === currentUserId);
+      setIsFavorite(Boolean(favoriteStatus));
+
       const targetOtherUser = activeChat.isGroupChat
         ? null
         : activeChat.participants?.find((p) => (p._id || p)?.toString() !== currentUserId);
@@ -269,6 +284,30 @@ const ChatInfoDrawer = ({ isOpen, onClose, messages, onStartCall }) => {
       toast.success(data.message || (data.isMuted ? "Chat muted" : "Chat unmuted"));
     } catch {
       toast.error("Failed to update mute settings");
+    }
+  };
+
+  const handleTogglePin = async () => {
+    try {
+      const { data } = await api.patch(`/chats/${activeChat._id}/pin`);
+      setIsPinned(data.isPinned);
+      toast.success(data.message || "Pin status updated!");
+      if (setActiveChat) setActiveChat((prev) => ({ ...prev, isPinned: data.isPinned }));
+      if (refreshChats) refreshChats();
+    } catch {
+      toast.error("Failed to update pin status");
+    }
+  };
+
+  const handleToggleFavorite = async () => {
+    try {
+      const { data } = await api.patch(`/chats/${activeChat._id}/favorite`);
+      setIsFavorite(data.isFavorite);
+      toast.success(data.message || "Favorite status updated!");
+      if (setActiveChat) setActiveChat((prev) => ({ ...prev, isFavorite: data.isFavorite }));
+      if (refreshChats) refreshChats();
+    } catch {
+      toast.error("Failed to update favorite status");
     }
   };
 
@@ -796,6 +835,52 @@ const ChatInfoDrawer = ({ isOpen, onClose, messages, onStartCall }) => {
             <span className="text-[10px] font-bold theme-text-muted uppercase tracking-wider">
               Advanced Privacy & Controls
             </span>
+
+            {/* Pin Chat Toggle with FiBookmark (Clean Pin Symbol) */}
+            <div
+              onClick={handleTogglePin}
+              className="flex items-center justify-between gap-3 py-1 border-b theme-border cursor-pointer hover:opacity-80 transition"
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${isPinned ? "bg-sky-500/15 text-sky-400" : "bg-slate-500/10 text-slate-400"}`}>
+                  <FiBookmark size={13} />
+                </div>
+                <div className="flex flex-col min-w-0">
+                  <span className="text-xs font-semibold theme-text">
+                    {isPinned ? "Unpin Chat" : "Pin Chat"}
+                  </span>
+                  <span className="text-[10px] theme-text-muted">
+                    {isPinned ? "Pinned to top of sidebar" : "Fix chat at top list"}
+                  </span>
+                </div>
+              </div>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isPinned ? "bg-sky-500/20 text-sky-400" : "theme-text-muted"}`}>
+                {isPinned ? "PINNED" : "OFF"}
+              </span>
+            </div>
+
+            {/* Add to Favorites (Star) Toggle */}
+            <div
+              onClick={handleToggleFavorite}
+              className="flex items-center justify-between gap-3 py-1 border-b theme-border cursor-pointer hover:opacity-80 transition"
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${isFavorite ? "bg-amber-500/15 text-amber-400" : "bg-slate-500/10 text-slate-400"}`}>
+                  <FiStar size={13} className={isFavorite ? "fill-amber-400 text-amber-400" : ""} />
+                </div>
+                <div className="flex flex-col min-w-0">
+                  <span className="text-xs font-semibold theme-text">
+                    {isFavorite ? "Remove from Favorites" : "Add to Favorites"}
+                  </span>
+                  <span className="text-[10px] theme-text-muted">
+                    {isFavorite ? "Marked as favorite chat" : "Add to favorites category"}
+                  </span>
+                </div>
+              </div>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isFavorite ? "bg-amber-500/20 text-amber-400" : "theme-text-muted"}`}>
+                {isFavorite ? "FAVORITE" : "OFF"}
+              </span>
+            </div>
 
             {/* Chat Wallpaper */}
             <div
