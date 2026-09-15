@@ -8,9 +8,7 @@ export const authService = {
   getMe: () => api.get("/auth/me"),
   logout: () => api.post("/auth/logout"),
 
-  // OTP Handlers
-  sendOtp: (phoneNumber) => api.post("/auth/send-otp", { phoneNumber }),
-  verifyOtp: (payload) => api.post("/auth/verify-otp", payload),
+  // Email OTP Handlers
   sendEmailOtp: (email) => api.post("/auth/send-email-otp", { email }),
   verifyEmailOtp: (payload) => api.post("/auth/verify-email-otp", payload),
 

@@ -118,7 +118,6 @@ exports.googleAuth = async (req, res) => {
           _id: selectedUser._id,
           fullName: selectedUser.fullName,
           username: selectedUser.username,
-          phoneNumber: selectedUser.phoneNumber,
           email: selectedUser.email,
           avatar: selectedUser.avatar,
           avatarConfig: selectedUser.avatarConfig,
@@ -137,7 +136,7 @@ exports.googleAuth = async (req, res) => {
     }
 
     const existingAccounts = await User.find({ email: cleanEmail }).select(
-      "fullName username email phoneNumber avatar profilePhotos isVIP lockPin"
+      "fullName username email avatar profilePhotos isVIP lockPin"
     );
 
     if (!existingAccounts || existingAccounts.length === 0) {
@@ -181,16 +180,10 @@ exports.sendEmailOtp = async (req, res) => {
     let user = await User.findOne({ email: cleanEmail });
     
     if (user) {
-      // Agar user pehle se hai, toh sirf OTP update karo
       user.otp = otp;
       user.otpExpires = otpExpires;
       await user.save();
     } else {
-      // Agar user nahi hai, toh DB me save mat karo! 
-      // Aap chaho toh temporary cache me rakh sakte ho ya bina user ke bas email bhej sakte ho.
-      // Yahan hum temporarily ek dummy doc bana rahe hain bina password ke taaki verify ke waqt check ho sake, 
-      // lekin isme account fully register nahi hoga jab tak verifyOtp/register call na ho.
-      // Behtar hai ki user document me fields optional rakhein ya ek temporary otp field handle karein.
       user = new User({
         email: cleanEmail,
         username: `temp_${Date.now()}`,
@@ -202,7 +195,6 @@ exports.sendEmailOtp = async (req, res) => {
       await user.save();
     }
 
-    // 🚀 Non-blocking immediate response + background email dispatch
     if (typeof sendOtpEmail === "function") {
       setImmediate(() => {
         sendOtpEmail(cleanEmail, otp).catch((err) => {
@@ -241,8 +233,6 @@ exports.verifyEmailOtp = async (req, res) => {
     user.otpExpires = null;
     user.isEmailVerified = true;
 
-    // Agar user ka password nahi hai (matlab abhi naya sendOtp se bana tha), 
-    // toh use login token mat do, balki bolo ki registration complete kare.
     if (!user.password) {
       await user.save();
       return res.status(200).json({
@@ -277,7 +267,7 @@ exports.verifyEmailOtp = async (req, res) => {
     const token = generateToken(user._id, sessionId);
 
     const linkedAccounts = await User.find({ email: cleanEmail }).select(
-      "fullName username email phoneNumber avatar profilePhotos isVIP lockPin"
+      "fullName username email avatar profilePhotos isVIP lockPin"
     );
 
     return res.status(200).json({
@@ -295,29 +285,6 @@ exports.verifyEmailOtp = async (req, res) => {
   }
 };
 
-// @desc Pre-check phone accounts
-// @route POST /api/auth/check-phone
-exports.checkPhoneAccounts = async (req, res) => {
-  try {
-    const { phoneNumber } = req.body;
-    if (!phoneNumber) return res.status(400).json({ success: false, message: "Phone number is required" });
-
-    const cleanNumber = phoneNumber.toString().replace(/\D/g, "").slice(-10);
-    const existingAccounts = await User.find({
-      $or: [{ phoneNumber: cleanNumber }, { phone: cleanNumber }],
-    }).select("username fullName profilePhotos avatar avatarConfig avatarBitmojiFallback isVIP email lockPin");
-
-    return res.status(200).json({
-      success: true,
-      accountCount: existingAccounts.length,
-      requiresEmail: existingAccounts.length >= 1,
-      accounts: existingAccounts,
-    });
-  } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
-  }
-};
-
 // @desc Register Profile
 // @route POST /api/auth/register
 exports.register = async (req, res) => {
@@ -325,8 +292,6 @@ exports.register = async (req, res) => {
     const {
       fullName,
       username,
-      phoneNumber,
-      phone,
       email,
       password,
       publicKey,
@@ -337,21 +302,12 @@ exports.register = async (req, res) => {
       dob,
     } = req.body;
 
-    const rawPhone = phoneNumber || phone || "";
-    const cleanPhone = rawPhone ? rawPhone.toString().replace(/\D/g, "").slice(-10) : "";
-    const cleanEmail = email && email.trim() ? email.trim().toLowerCase() : undefined;
+    const cleanEmail = email && email.trim() ? email.trim().toLowerCase() : "";
 
-    if (!fullName || !username || !password) {
+    if (!fullName || !username || !password || !cleanEmail) {
       return res.status(400).json({
         success: false,
-        message: "Full Name, Username, and Password are required.",
-      });
-    }
-
-    if (!cleanPhone && !cleanEmail) {
-      return res.status(400).json({
-        success: false,
-        message: "Either Mobile Number or Email is required.",
+        message: "Full Name, Username, Email, and Password are required.",
       });
     }
 
@@ -362,13 +318,7 @@ exports.register = async (req, res) => {
       return res.status(400).json({ success: false, message: "This username is already taken." });
     }
 
-    // Check agar pehle se koi temp/unverified user pada hai email ya phone par toh use update karo, warna naya banao
-    let existingUser = null;
-    if (cleanEmail) {
-      existingUser = await User.findOne({ email: cleanEmail, password: "" });
-    } else if (cleanPhone) {
-      existingUser = await User.findOne({ $or: [{ phoneNumber: cleanPhone }, { phone: cleanPhone }], password: "" });
-    }
+    let existingUser = await User.findOne({ email: cleanEmail, password: "" });
 
     const sessionId = crypto.randomBytes(16).toString("hex");
     const { browser, os, deviceName } = parseUserAgent(req.headers["user-agent"]);
@@ -397,8 +347,7 @@ exports.register = async (req, res) => {
     if (existingUser) {
       existingUser.fullName = fullName.trim();
       existingUser.username = cleanUsername;
-      existingUser.phoneNumber = cleanPhone;
-      existingUser.phone = cleanPhone;
+      existingUser.email = cleanEmail;
       existingUser.password = hashedPassword;
       existingUser.dob = dob || null;
       existingUser.publicKey = publicKey || "";
@@ -407,8 +356,7 @@ exports.register = async (req, res) => {
       existingUser.avatarConfig = avatarConfig || defaultAvatarConfig;
       existingUser.profilePhotos = initialPhotos;
       existingUser.gender = gender || "Prefer not to say";
-      existingUser.isPhoneVerified = Boolean(cleanPhone);
-      existingUser.isEmailVerified = Boolean(cleanEmail);
+      existingUser.isEmailVerified = true;
       existingUser.streakRecoveriesLeft = 3;
       existingUser.sessions = [
         {
@@ -427,8 +375,6 @@ exports.register = async (req, res) => {
       const newUserData = {
         fullName: fullName.trim(),
         username: cleanUsername,
-        phoneNumber: cleanPhone,
-        phone: cleanPhone,
         email: cleanEmail,
         password: hashedPassword,
         dob: dob || null,
@@ -438,8 +384,7 @@ exports.register = async (req, res) => {
         avatarConfig: avatarConfig || defaultAvatarConfig,
         profilePhotos: initialPhotos,
         gender: gender || "Prefer not to say",
-        isPhoneVerified: Boolean(cleanPhone),
-        isEmailVerified: Boolean(cleanEmail),
+        isEmailVerified: true,
         streakRecoveriesLeft: 3,
         sessions: [
           {
@@ -468,7 +413,6 @@ exports.register = async (req, res) => {
         _id: user._id,
         fullName: user.fullName,
         username: user.username,
-        phoneNumber: user.phoneNumber,
         email: user.email,
         avatar: user.avatar,
         avatarConfig: user.avatarConfig,
@@ -490,45 +434,29 @@ exports.register = async (req, res) => {
   }
 };
 
-// @desc Password Login
+// @desc Password Login (Email or Username + Password)
 // @route POST /api/auth/login
 exports.loginWithPassword = async (req, res) => {
   try {
-    const rawInput =
-      req.body.identifier ||
-      req.body.phoneNumber ||
-      req.body.emailOrUsername ||
-      req.body.username ||
-      req.body.email ||
-      req.body.phone;
-
+    const rawInput = req.body.identifier || req.body.emailOrUsername || req.body.username || req.body.email;
     const rawPassword = req.body.password;
     const clientDeviceId = req.body.deviceId;
 
     if (!rawInput || !rawPassword) {
       return res.status(400).json({
         success: false,
-        message: "Please enter your username/mobile/email and password",
+        message: "Please enter your email/username and password",
       });
     }
 
     const input = rawInput.toString().trim();
     const cleanUsername = input.replace(/^@/, "").trim().toLowerCase();
-    const digitsOnly = input.replace(/\D/g, "");
 
     const conditions = [
       { username: cleanUsername },
       { username: input.toLowerCase() },
       { email: input.toLowerCase() },
-      { phone: input },
-      { phoneNumber: input },
     ];
-
-    if (digitsOnly.length >= 10) {
-      const last10 = digitsOnly.slice(-10);
-      conditions.push({ phone: last10 });
-      conditions.push({ phoneNumber: last10 });
-    }
 
     const user = await User.findOne({ $or: conditions }).select("+password");
 
@@ -581,7 +509,6 @@ exports.loginWithPassword = async (req, res) => {
         _id: user._id,
         fullName: user.fullName,
         username: user.username,
-        phoneNumber: user.phoneNumber,
         email: user.email,
         avatar: user.avatar,
         avatarConfig: user.avatarConfig,
@@ -608,19 +535,12 @@ exports.loginWithPassword = async (req, res) => {
 exports.getLinkedAccounts = async (req, res) => {
   try {
     const currentEmail = req.user.email;
-    const currentPhone = req.user.phoneNumber || req.user.phone;
-
-    const queryConditions = [];
-    if (currentPhone) {
-      queryConditions.push({ phoneNumber: currentPhone });
-      queryConditions.push({ phone: currentPhone });
-    }
-    if (currentEmail) {
-      queryConditions.push({ email: currentEmail });
+    if (!currentEmail) {
+      return res.status(200).json({ success: true, accounts: [req.user] });
     }
 
-    const accounts = await User.find({ $or: queryConditions }).select(
-      "fullName username email phoneNumber avatar profilePhotos isVIP streakRecoveriesLeft lockPin"
+    const accounts = await User.find({ email: currentEmail }).select(
+      "fullName username email avatar profilePhotos isVIP streakRecoveriesLeft lockPin"
     );
 
     return res.status(200).json({ success: true, accounts });
@@ -640,13 +560,8 @@ exports.switchAccount = async (req, res) => {
       return res.status(404).json({ success: false, message: "Target profile not found" });
     }
 
-    const currentPhone = req.user.phoneNumber || req.user.phone;
     const currentEmail = req.user.email;
-
-    const isAuthorized =
-      (targetUser.phoneNumber && targetUser.phoneNumber === currentPhone) ||
-      (targetUser.phone && targetUser.phone === currentPhone) ||
-      (currentEmail && targetUser.email === currentEmail);
+    const isAuthorized = currentEmail && targetUser.email === currentEmail;
 
     if (!isAuthorized) {
       return res.status(403).json({ success: false, message: "Unauthorized profile switch" });
@@ -678,7 +593,6 @@ exports.switchAccount = async (req, res) => {
         _id: targetUser._id,
         fullName: targetUser.fullName,
         username: targetUser.username,
-        phoneNumber: targetUser.phoneNumber,
         email: targetUser.email,
         avatar: targetUser.avatar,
         avatarConfig: targetUser.avatarConfig,
@@ -704,7 +618,6 @@ exports.switchAccount = async (req, res) => {
 exports.deleteAccount = async (req, res) => {
   try {
     const targetUserId = req.params.userId || req.user._id;
-    const currentPhone = req.user.phoneNumber || req.user.phone;
     const currentEmail = req.user.email;
 
     const targetUser = await User.findById(targetUserId);
@@ -714,7 +627,6 @@ exports.deleteAccount = async (req, res) => {
 
     const isOwner =
       targetUser._id.toString() === req.user._id.toString() ||
-      (targetUser.phoneNumber && targetUser.phoneNumber === currentPhone) ||
       (currentEmail && targetUser.email === currentEmail);
 
     if (!isOwner) {
@@ -793,7 +705,6 @@ exports.updateProfile = async (req, res) => {
       dob,
       location,
       website,
-      showPhone,
       showDob,
       coverBanner,
       isPrivateAccount,
@@ -810,7 +721,6 @@ exports.updateProfile = async (req, res) => {
     if (gender !== undefined) updates.gender = gender;
     if (location !== undefined) updates.location = location.trim();
     if (website !== undefined) updates.website = website.trim();
-    if (showPhone !== undefined) updates.showPhone = Boolean(showPhone);
     if (showDob !== undefined) updates.showDob = Boolean(showDob);
     if (coverBanner !== undefined) updates.coverBanner = coverBanner;
     if (isPrivateAccount !== undefined) updates.isPrivateAccount = Boolean(isPrivateAccount);
@@ -886,105 +796,6 @@ exports.activateVipPlan = async (req, res) => {
       success: true,
       message: `👑 KafChat VIP PRO ${plan} Plan Activated!`,
       user: updatedUser,
-    });
-  } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-// @desc Send OTP
-// @route POST /api/auth/send-otp
-exports.sendOtp = async (req, res) => {
-  try {
-    const { phoneNumber, phone } = req.body;
-    const rawNumber = phoneNumber || phone;
-
-    if (!rawNumber) {
-      return res.status(400).json({ success: false, message: "Phone number is required" });
-    }
-
-    const cleanNumber = rawNumber.toString().replace(/\D/g, "").slice(-10);
-    if (cleanNumber.length !== 10) {
-      return res.status(400).json({ success: false, message: "Please enter a valid 10-digit mobile number" });
-    }
-
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const otpExpires = new Date(Date.now() + 5 * 60 * 1000);
-
-    let user = await User.findOne({ $or: [{ phoneNumber: cleanNumber }, { phone: cleanNumber }] });
-    if (user) {
-      user.otp = otp;
-      user.otpExpires = otpExpires;
-      await user.save();
-    } else {
-      user = new User({
-        phoneNumber: cleanNumber,
-        phone: cleanNumber,
-        username: `temp_${cleanNumber}`,
-        fullName: "Temp User",
-        password: "",
-        otp,
-        otpExpires,
-      });
-      await user.save();
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: `OTP sent successfully to +91 ${cleanNumber}`,
-      otp: process.env.NODE_ENV === "production" ? undefined : otp,
-    });
-  } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-// @desc Verify OTP
-// @route POST /api/auth/verify-otp
-exports.verifyOtp = async (req, res) => {
-  try {
-    const { phoneNumber, phone, otp } = req.body;
-    const cleanNumber = (phoneNumber || phone || "").toString().replace(/\D/g, "").slice(-10);
-
-    let user = await User.findOne({ $or: [{ phoneNumber: cleanNumber }, { phone: cleanNumber }] });
-
-    if (otp && (!user || user.otp !== otp)) {
-      return res.status(400).json({ success: false, message: "Invalid or incorrect OTP" });
-    }
-
-    if (otp && user && new Date() > user.otpExpires) {
-      return res.status(400).json({ success: false, message: "OTP has expired. Request a new one." });
-    }
-
-    const sessionId = crypto.randomBytes(16).toString("hex");
-
-    if (!user || !user.password) {
-      return res.status(200).json({
-        success: true,
-        isNewUser: true,
-        phoneNumber: cleanNumber,
-        message: "Phone verified. Please create your username and password.",
-      });
-    }
-
-    user.otp = null;
-    user.otpExpires = null;
-    user.isPhoneVerified = true;
-    user.isOnline = true;
-    user.loginCount = (user.loginCount || 0) + 1;
-    user.lastLoginAt = new Date();
-    await user.save();
-
-    const token = generateToken(user._id, sessionId);
-
-    return res.status(200).json({
-      success: true,
-      user,
-      token,
-      sessionId,
-      isNewUser: false,
-      phoneNumber: cleanNumber,
-      message: "OTP Verified successfully!",
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
@@ -1177,17 +988,12 @@ exports.sendForgotPasswordOtp = async (req, res) => {
   try {
     const { identifier } = req.body;
     if (!identifier) {
-      return res.status(400).json({ success: false, message: "Email or Mobile is required" });
+      return res.status(400).json({ success: false, message: "Email or Username is required" });
     }
 
     const cleanInput = identifier.trim().toLowerCase();
-    const digitsOnly = cleanInput.replace(/\D/g, "");
 
     const conditions = [{ email: cleanInput }, { username: cleanInput }];
-    if (digitsOnly.length >= 10) {
-      conditions.push({ phoneNumber: digitsOnly.slice(-10) });
-      conditions.push({ phone: digitsOnly.slice(-10) });
-    }
 
     const user = await User.findOne({ $or: conditions });
     if (!user) {
@@ -1206,7 +1012,6 @@ exports.sendForgotPasswordOtp = async (req, res) => {
     user.otpExpires = new Date(Date.now() + 10 * 60 * 1000);
     await user.save();
 
-    // 🚀 Non-blocking immediate response + background email dispatch
     if (typeof sendOtpEmail === "function") {
       setImmediate(() => {
         sendOtpEmail(user.email, otp).catch((err) => {
@@ -1256,6 +1061,7 @@ exports.resetPasswordWithOtp = async (req, res) => {
     await user.save();
 
     return res.status(200).json({
+      success: timeStamp => { },
       success: true,
       message: "Password reset successfully! Please login with your new password.",
     });

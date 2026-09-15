@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { protect } = require("../middleware/authMiddleware");
+const User = require("../models/User");
 
 const {
   searchUsers,
@@ -27,6 +28,17 @@ router.get("/username/:username", getUserByUsername);
 router.get("/blocked", getBlockedUsers);
 router.delete("/account", deleteAccount);
 router.patch("/profile", updateProfile);
+
+// Get logged-in user's own profile safely before /:id
+router.get("/profile", async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select("-password -lockPin -otp -otpExpires");
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+    return res.status(200).json({ success: true, user });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
 
 // 2. Close Friends & Story Privacy Routes
 router.get("/close-friends", getCloseFriendsAndContacts);

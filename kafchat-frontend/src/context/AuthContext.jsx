@@ -107,11 +107,10 @@ export const AuthProvider = ({ children }) => {
       const res = await api.post("/auth/google", {
         token: credentialToken,
         deviceId,
-        targetUserId, // Agar user ne account select kiya hai toh ID jayegi
+        targetUserId,
       });
 
       if (res.data?.success) {
-        // Agar multiple accounts milte hain ya naya user hai, toh response return karo taaki frontend popup ya registration form khol sake
         if (res.data.hasExistingAccounts || res.data.isNewUser) {
           return res.data; 
         }
@@ -144,13 +143,12 @@ export const AuthProvider = ({ children }) => {
   );
 
   const register = useCallback(
-    async ({ phoneNumber, email, fullName, username, password, avatar, gender, dob }) => {
+    async ({ email, fullName, username, password, avatar, gender, dob }) => {
       const keys = e2eeKeys || (await getOrGenerateKeyPair());
       const rootDeviceId = localStorage.getItem("kafchat_device_id") || "root_device_" + Date.now();
       localStorage.setItem("kafchat_device_id", rootDeviceId);
 
       const res = await api.post("/auth/register", {
-        phoneNumber,
         email,
         fullName,
         username,
@@ -172,14 +170,14 @@ export const AuthProvider = ({ children }) => {
     [completeAuth, e2eeKeys]
   );
 
-  const sendOtp = useCallback(async (phoneNumber) => {
-    const { data } = await authService.sendOtp(phoneNumber);
+  const sendEmailOtp = useCallback(async (email) => {
+    const { data } = await api.post("/auth/send-email-otp", { email });
     return data;
   }, []);
 
-  const verifyOtp = useCallback(
-    async ({ phoneNumber, otp }) => {
-      const { data } = await authService.verifyOtp({ phoneNumber, otp });
+  const verifyEmailOtp = useCallback(
+    async ({ email, otp, deviceId }) => {
+      const { data } = await api.post("/auth/verify-email-otp", { email, otp, deviceId });
       if (data.token && data.user) {
         completeAuth(data);
       }
@@ -263,8 +261,8 @@ export const AuthProvider = ({ children }) => {
       e2eeKeys,
       isAuthenticated: Boolean(token && user),
       checkUsername,
-      sendOtp,
-      verifyOtp,
+      sendEmailOtp,
+      verifyEmailOtp,
       loginWithPassword,
       loginWithGoogle,
       register,
@@ -282,8 +280,8 @@ export const AuthProvider = ({ children }) => {
       loading,
       e2eeKeys,
       checkUsername,
-      sendOtp,
-      verifyOtp,
+      sendEmailOtp,
+      verifyEmailOtp,
       loginWithPassword,
       loginWithGoogle,
       register,

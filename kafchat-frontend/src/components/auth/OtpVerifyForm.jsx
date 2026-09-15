@@ -3,7 +3,7 @@ import { FiArrowRight, FiEdit2 } from "react-icons/fi";
 import Button from "../common/Button";
 import { OTP_LENGTH, OTP_RESEND_SECONDS } from "../../utils/constants";
 
-const OtpVerifyForm = ({ phoneNumber, onSubmit, onResend, onEditNumber, loading, devOtp }) => {
+const OtpVerifyForm = ({ email, onSubmit, onResend, onEditEmail, loading, devOtp }) => {
   const [digits, setDigits] = useState(Array(OTP_LENGTH).fill(""));
   const [secondsLeft, setSecondsLeft] = useState(OTP_RESEND_SECONDS);
   const inputRefs = useRef([]);
@@ -59,16 +59,18 @@ const OtpVerifyForm = ({ phoneNumber, onSubmit, onResend, onEditNumber, loading,
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-5 w-full">
       <div>
-        <h2 className="font-display text-2xl font-semibold text-ash mb-1.5">Verify code</h2>
+        <h2 className="font-display text-2xl font-semibold text-ash mb-1.5">Verify email code</h2>
         <p className="text-sm text-ash-muted">
-          Sent to <span className="font-mono text-ash">{phoneNumber}</span>{" "}
-          <button
-            type="button"
-            onClick={onEditNumber}
-            className="inline-flex items-center gap-1 text-signal-sky-deep hover:underline ml-1"
-          >
-            <FiEdit2 size={12} /> edit
-          </button>
+          Sent to <span className="font-mono text-ash">{email}</span>{" "}
+          {onEditEmail && (
+            <button
+              type="button"
+              onClick={onEditEmail}
+              className="inline-flex items-center gap-1 text-signal-sky-deep hover:underline ml-1"
+            >
+              <FiEdit2 size={12} /> edit
+            </button>
+          )}
         </p>
         {devOtp && (
           <p className="mt-2 text-xs font-mono text-signal-sky bg-signal-sky/10 border border-signal-sky/20 rounded-lg px-3 py-1.5 inline-block">

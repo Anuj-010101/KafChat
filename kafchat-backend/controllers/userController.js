@@ -30,7 +30,7 @@ exports.getUserByUsername = async (req, res) => {
   }
 };
 
-// @desc Universal Search (By Name, @username, or Phone)
+// @desc Universal Search (By Name or @username)
 // @route GET /api/users/search OR /api/users
 exports.searchUsers = async (req, res) => {
   try {
@@ -50,8 +50,6 @@ exports.searchUsers = async (req, res) => {
       $or: [
         { username: regex },
         { fullName: regex },
-        { phoneNumber: regex },
-        { phone: regex },
       ],
     })
       .select("fullName username avatar profilePhotos isVIP isOnline bio isPrivateAccount isGhostModeActive followers following")
@@ -283,7 +281,6 @@ exports.updateProfile = async (req, res) => {
       dob,
       location,
       website,
-      showPhone,
       showDob,
       isPrivateAccount,
       isGhostModeActive,
@@ -307,7 +304,6 @@ exports.updateProfile = async (req, res) => {
     if (dob !== undefined) user.dob = dob ? new Date(dob) : null;
     if (location !== undefined) user.location = location;
     if (website !== undefined) user.website = website;
-    if (showPhone !== undefined) user.showPhone = Boolean(showPhone);
     if (showDob !== undefined) user.showDob = Boolean(showDob);
     if (isPrivateAccount !== undefined) user.isPrivateAccount = Boolean(isPrivateAccount);
     if (isGhostModeActive !== undefined) user.isGhostModeActive = Boolean(isGhostModeActive);

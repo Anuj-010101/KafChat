@@ -11,7 +11,7 @@ const PasswordLoginForm = ({ onSubmit, onForgotPassword, loading }) => {
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!identifier.trim() || !password) {
-      setError("Enter your username/phone and password");
+      setError("Enter your username/email and password");
       return;
     }
     setError("");
@@ -24,12 +24,12 @@ const PasswordLoginForm = ({ onSubmit, onForgotPassword, loading }) => {
         <h2 className="font-display text-2xl font-semibold text-ash mb-1.5">
           Welcome back
         </h2>
-        <p className="text-sm text-ash-muted">Log in with your username or phone number.</p>
+        <p className="text-sm text-ash-muted">Log in with your username or email.</p>
       </div>
 
       <Input
-        label="Username or phone number"
-        placeholder="username or Mobile no."
+        label="Username or email"
+        placeholder="username or email"
         inputClassName="font-mono"
         value={identifier}
         onChange={(e) => setIdentifier(e.target.value)}

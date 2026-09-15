@@ -58,21 +58,10 @@ const userSchema = new mongoose.Schema(
     },
     email: {
       type: String,
+      required: [true, "Email is required"],
+      unique: true,
       trim: true,
       lowercase: true,
-      default: null,
-    },
-    phoneNumber: {
-      type: String,
-      trim: true,
-      default: "",
-      sparse: true, // Khali ya duplicate strings par index error aane se rokte hain
-    },
-    phone: {
-      type: String,
-      trim: true,
-      default: "",
-      sparse: true, // Khali ya duplicate strings par index error aane se rokte hain
     },
     password: {
       type: String,
@@ -111,10 +100,6 @@ const userSchema = new mongoose.Schema(
     website: {
       type: String,
       default: "",
-    },
-    showPhone: {
-      type: Boolean,
-      default: false,
     },
     showDob: {
       type: Boolean,
@@ -203,10 +188,6 @@ const userSchema = new mongoose.Schema(
       default: null,
     },
     isEmailVerified: {
-      type: Boolean,
-      default: false,
-    },
-    isPhoneVerified: {
       type: Boolean,
       default: false,
     },
