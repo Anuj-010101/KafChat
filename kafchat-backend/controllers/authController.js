@@ -179,21 +179,28 @@ exports.sendEmailOtp = async (req, res) => {
     const otpExpires = new Date(Date.now() + 5 * 60 * 1000);
 
     let user = await User.findOne({ email: cleanEmail });
-    if (!user) {
-      const baseUsername = cleanEmail.split("@")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
+    
+    if (user) {
+      // Agar user pehle se hai, toh sirf OTP update karo
+      user.otp = otp;
+      user.otpExpires = otpExpires;
+      await user.save();
+    } else {
+      // Agar user nahi hai, toh DB me save mat karo! 
+      // Aap chaho toh temporary cache me rakh sakte ho ya bina user ke bas email bhej sakte ho.
+      // Yahan hum temporarily ek dummy doc bana rahe hain bina password ke taaki verify ke waqt check ho sake, 
+      // lekin isme account fully register nahi hoga jab tak verifyOtp/register call na ho.
+      // Behtar hai ki user document me fields optional rakhein ya ek temporary otp field handle karein.
       user = new User({
         email: cleanEmail,
-        username: `${baseUsername}_${Math.floor(100 + Math.random() * 900)}`,
-        fullName: baseUsername,
-        phoneNumber: "",
-        phone: "",
-        password: crypto.randomBytes(16).toString("hex"),
+        username: `temp_${Date.now()}`,
+        fullName: "Temp User",
+        password: "", // Empty password to indicate unverified/new
+        otp,
+        otpExpires,
       });
+      await user.save();
     }
-
-    user.otp = otp;
-    user.otpExpires = otpExpires;
-    await user.save();
 
     // 🚀 Non-blocking immediate response + background email dispatch
     if (typeof sendOtpEmail === "function") {
@@ -233,6 +240,19 @@ exports.verifyEmailOtp = async (req, res) => {
     user.otp = null;
     user.otpExpires = null;
     user.isEmailVerified = true;
+
+    // Agar user ka password nahi hai (matlab abhi naya sendOtp se bana tha), 
+    // toh use login token mat do, balki bolo ki registration complete kare.
+    if (!user.password) {
+      await user.save();
+      return res.status(200).json({
+        success: true,
+        isNewUser: true,
+        email: cleanEmail,
+        message: "Email verified successfully. Please complete your registration.",
+      });
+    }
+
     user.isOnline = true;
     user.loginCount = (user.loginCount || 0) + 1;
     user.lastLoginAt = new Date();
@@ -266,7 +286,7 @@ exports.verifyEmailOtp = async (req, res) => {
       token,
       sessionId,
       linkedAccounts,
-      isNewUser: !user.password,
+      isNewUser: false,
       message: "Email OTP verified successfully!",
     });
   } catch (error) {
@@ -342,17 +362,12 @@ exports.register = async (req, res) => {
       return res.status(400).json({ success: false, message: "This username is already taken." });
     }
 
-    if (cleanPhone) {
-      const existingOnPhone = await User.find({
-        $or: [{ phoneNumber: cleanPhone }, { phone: cleanPhone }],
-      });
-
-      if (existingOnPhone.length >= 1 && !cleanEmail) {
-        return res.status(400).json({
-          success: false,
-          message: "Email ID is mandatory when creating more than one account on the same phone number.",
-        });
-      }
+    // Check agar pehle se koi temp/unverified user pada hai email ya phone par toh use update karo, warna naya banao
+    let existingUser = null;
+    if (cleanEmail) {
+      existingUser = await User.findOne({ email: cleanEmail, password: "" });
+    } else if (cleanPhone) {
+      existingUser = await User.findOne({ $or: [{ phoneNumber: cleanPhone }, { phone: cleanPhone }], password: "" });
     }
 
     const sessionId = crypto.randomBytes(16).toString("hex");
@@ -376,24 +391,26 @@ exports.register = async (req, res) => {
     };
 
     const initialPhotos = avatar ? [{ url: avatar, uploadedAt: new Date() }] : [];
+    const hashedPassword = await bcrypt.hash(password, 10);
 
-    const newUserData = {
-      fullName: fullName.trim(),
-      username: cleanUsername,
-      phoneNumber: cleanPhone,
-      phone: cleanPhone,
-      password,
-      dob: dob || null,
-      publicKey: publicKey || "",
-      rootDeviceId: rootDeviceId || sessionId,
-      avatar: avatar || "",
-      avatarConfig: avatarConfig || defaultAvatarConfig,
-      profilePhotos: initialPhotos,
-      gender: gender || "Prefer not to say",
-      isPhoneVerified: Boolean(cleanPhone),
-      isEmailVerified: Boolean(cleanEmail),
-      streakRecoveriesLeft: 3,
-      sessions: [
+    let user;
+    if (existingUser) {
+      existingUser.fullName = fullName.trim();
+      existingUser.username = cleanUsername;
+      existingUser.phoneNumber = cleanPhone;
+      existingUser.phone = cleanPhone;
+      existingUser.password = hashedPassword;
+      existingUser.dob = dob || null;
+      existingUser.publicKey = publicKey || "";
+      existingUser.rootDeviceId = rootDeviceId || sessionId;
+      existingUser.avatar = avatar || "";
+      existingUser.avatarConfig = avatarConfig || defaultAvatarConfig;
+      existingUser.profilePhotos = initialPhotos;
+      existingUser.gender = gender || "Prefer not to say";
+      existingUser.isPhoneVerified = Boolean(cleanPhone);
+      existingUser.isEmailVerified = Boolean(cleanEmail);
+      existingUser.streakRecoveriesLeft = 3;
+      existingUser.sessions = [
         {
           sessionId,
           deviceId: rootDeviceId || sessionId,
@@ -404,14 +421,42 @@ exports.register = async (req, res) => {
           isRoot: true,
           lastActive: new Date(),
         },
-      ],
-    };
-
-    if (cleanEmail) {
-      newUserData.email = cleanEmail;
+      ];
+      user = await existingUser.save();
+    } else {
+      const newUserData = {
+        fullName: fullName.trim(),
+        username: cleanUsername,
+        phoneNumber: cleanPhone,
+        phone: cleanPhone,
+        email: cleanEmail,
+        password: hashedPassword,
+        dob: dob || null,
+        publicKey: publicKey || "",
+        rootDeviceId: rootDeviceId || sessionId,
+        avatar: avatar || "",
+        avatarConfig: avatarConfig || defaultAvatarConfig,
+        profilePhotos: initialPhotos,
+        gender: gender || "Prefer not to say",
+        isPhoneVerified: Boolean(cleanPhone),
+        isEmailVerified: Boolean(cleanEmail),
+        streakRecoveriesLeft: 3,
+        sessions: [
+          {
+            sessionId,
+            deviceId: rootDeviceId || sessionId,
+            deviceName,
+            browser,
+            os,
+            ip: req.ip || "",
+            isRoot: true,
+            lastActive: new Date(),
+          },
+        ],
+      };
+      user = await User.create(newUserData);
     }
 
-    const user = await User.create(newUserData);
     const token = generateToken(user._id, sessionId);
 
     return res.status(201).json({
@@ -867,19 +912,22 @@ exports.sendOtp = async (req, res) => {
     const otpExpires = new Date(Date.now() + 5 * 60 * 1000);
 
     let user = await User.findOne({ $or: [{ phoneNumber: cleanNumber }, { phone: cleanNumber }] });
-    if (!user) {
+    if (user) {
+      user.otp = otp;
+      user.otpExpires = otpExpires;
+      await user.save();
+    } else {
       user = new User({
         phoneNumber: cleanNumber,
         phone: cleanNumber,
-        username: `user_${cleanNumber.slice(-4)}_${Date.now().toString().slice(-4)}`,
-        fullName: `User ${cleanNumber.slice(-4)}`,
-        password: crypto.randomBytes(16).toString("hex"),
+        username: `temp_${cleanNumber}`,
+        fullName: "Temp User",
+        password: "",
+        otp,
+        otpExpires,
       });
+      await user.save();
     }
-
-    user.otp = otp;
-    user.otpExpires = otpExpires;
-    await user.save();
 
     return res.status(200).json({
       success: true,
@@ -910,7 +958,7 @@ exports.verifyOtp = async (req, res) => {
 
     const sessionId = crypto.randomBytes(16).toString("hex");
 
-    if (!user) {
+    if (!user || !user.password) {
       return res.status(200).json({
         success: true,
         isNewUser: true,
@@ -934,7 +982,7 @@ exports.verifyOtp = async (req, res) => {
       user,
       token,
       sessionId,
-      isNewUser: !user.password,
+      isNewUser: false,
       phoneNumber: cleanNumber,
       message: "OTP Verified successfully!",
     });
@@ -1202,7 +1250,7 @@ exports.resetPasswordWithOtp = async (req, res) => {
       return res.status(400).json({ success: false, message: "OTP has expired. Please request again." });
     }
 
-    user.password = newPassword;
+    user.password = await bcrypt.hash(newPassword, 10);
     user.otp = null;
     user.otpExpires = null;
     await user.save();

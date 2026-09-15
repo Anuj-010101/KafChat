@@ -56,7 +56,6 @@ const ChatWindow = () => {
   );
   const otherUserId = (otherParticipant?._id || otherParticipant)?.toString();
 
-  // 🔌 Auto join chat room on active chat change
   useEffect(() => {
     const activeSocket = window.socket || getSocket();
     if (activeSocket && activeChat?._id) {
@@ -64,13 +63,11 @@ const ChatWindow = () => {
     }
   }, [activeChat?._id]);
 
-  // 📸 PRO/VIP SNAPCHAT SCREENSHOT & RECORDING LISTENER
   useEffect(() => {
     const activeSocket = window.socket || getSocket();
     if (!activeSocket) return;
 
     const handleScreenshotAlert = (data) => {
-      // Agar current user VIP/Pro hai aur event kisi doosre user ne trigger kiya hai
       if (data?.alertText && data.senderId !== currentUserId && isVip) {
         toast(data.alertText, {
           icon: '🚨',
@@ -88,7 +85,6 @@ const ChatWindow = () => {
 
     activeSocket.on("screenshot_alert", handleScreenshotAlert);
 
-    // Keyboard shortcut (PrintScreen)
     const handleKeyDown = (e) => {
       if (e.key === "PrintScreen" || (e.ctrlKey && e.shiftKey && e.key === "S")) {
         if (activeChat?._id) {
@@ -108,7 +104,6 @@ const ChatWindow = () => {
     };
   }, [activeChat?._id, user?.username, isVip, currentUserId]);
 
-  // 🛠️ TESTING UTILITY: Double click on Chat Header to simulate screenshot event
   const handleSimulateScreenshot = () => {
     const activeSocket = window.socket || getSocket();
     if (activeSocket && activeChat?._id) {
@@ -246,10 +241,10 @@ const ChatWindow = () => {
   const streakRecoveriesLeft = Number(user?.streakRecoveriesLeft || (isVip ? 5 : 3));
 
   return (
-    <div className="flex-1 flex flex-col h-[100dvh] max-h-[100dvh] w-full min-w-0 theme-chat-bg relative select-none overflow-hidden">
-      {/* Top Header */}
+    <div className="fixed inset-0 z-40 sm:relative sm:flex-1 flex flex-col h-[100dvh] sm:h-full w-full min-w-0 theme-chat-bg select-none overflow-hidden bg-[var(--app-bg)]">
+      {/* 🔒 Fixed Top Header (WhatsApp Style - Locked on Mobile & Desktop) */}
       <div 
-        className="sticky top-0 z-30 w-full shrink-0 shadow-md cursor-default"
+        className="sticky top-0 z-50 w-full shrink-0 shadow-md cursor-default theme-panel-bg"
         onDoubleClick={handleSimulateScreenshot}
       >
         <ChatHeader onOpenInfo={() => setShowInfoDrawer(true)} onStartCall={startCall} />
