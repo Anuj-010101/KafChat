@@ -25,6 +25,19 @@ import toast from "react-hot-toast";
 
 const DEFAULT_REACTIONS = ["❤️", "👍", "😂", "😮", "😢", "🔥", "🎉", "🙏"];
 
+const formatLongText = (text) => {
+  if (!text) return "";
+  return text
+    .split(" ")
+    .map((word) => {
+      if (word.length > 25 && !word.startsWith("http")) {
+        return word.match(/.{1,20}/g).join("\u200B");
+      }
+      return word;
+    })
+    .join(" ");
+};
+
 const MessageBubble = ({ message }) => {
   const { user } = useAuth();
   const {
@@ -40,6 +53,14 @@ const MessageBubble = ({ message }) => {
   const [showMenu, setShowMenu] = useState(false);
   const [showReactionPicker, setShowReactionPicker] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+
+  // Swipe & Long Press states
+  const [swipeOffset, setSwipeOffset] = useState(0);
+  const [isSwiping, setIsSwiping] = useState(false);
+  const touchStartX = useRef(0);
+  const touchStartY = useRef(0);
+  const longPressTimer = useRef(null);
+
   const menuRef = useRef(null);
 
   const currentUserId = (user?._id || user?.id)?.toString();
@@ -50,7 +71,6 @@ const MessageBubble = ({ message }) => {
   const isSavedCloud = Boolean(activeChat?.isSavedCloud);
   const isGroup = Boolean(activeChat?.isGroupChat);
 
-  // Close context dropdown on outside click
   useEffect(() => {
     const handleOutsideClick = (e) => {
       if (menuRef.current && !menuRef.current.contains(e.target)) {
@@ -62,7 +82,54 @@ const MessageBubble = ({ message }) => {
     return () => document.removeEventListener("mousedown", handleOutsideClick);
   }, []);
 
-  // Read Receipt Status
+  // Robust Touch handlers for Slide-to-Reply & Mobile Long Press
+  const handleTouchStart = (e) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+    setIsSwiping(true);
+
+    if (longPressTimer.current) clearTimeout(longPressTimer.current);
+
+    longPressTimer.current = setTimeout(() => {
+      setShowMenu(true);
+      if (navigator.vibrate) navigator.vibrate(60);
+    }, 500);
+  };
+
+  const handleTouchMove = (e) => {
+    if (!isSwiping) return;
+    const currentX = e.touches[0].clientX;
+    const currentY = e.touches[0].clientY;
+    const diffX = currentX - touchStartX.current;
+    const diffY = currentY - touchStartY.current;
+
+    // If scrolling vertically, cancel long press & swipe
+    if (Math.abs(diffY) > 15 || Math.abs(diffY) > Math.abs(diffX)) {
+      if (longPressTimer.current) clearTimeout(longPressTimer.current);
+      setIsSwiping(false);
+      return;
+    }
+
+    if (Math.abs(diffX) > 10 && longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+    }
+
+    // Slide-to-Reply offset (right swipe)
+    if (diffX > 0 && diffX < 130) {
+      setSwipeOffset(diffX);
+    }
+  };
+
+  const handleTouchEnd = () => {
+    if (longPressTimer.current) clearTimeout(longPressTimer.current);
+    setIsSwiping(false);
+
+    if (swipeOffset > 55) {
+      setReplyingMessage(message);
+    }
+    setSwipeOffset(0);
+  };
+
   const renderReadReceiptTicks = () => {
     if (!isSender) return null;
 
@@ -159,7 +226,6 @@ const MessageBubble = ({ message }) => {
     }
   };
 
-  // Instagram Story Mention Data Detector
   const isStoryMentionMessage =
     message.mediaType === "story_mention" ||
     Boolean(message.storyMentionContext) ||
@@ -167,7 +233,6 @@ const MessageBubble = ({ message }) => {
 
   const mentionContext = message.storyMentionContext || message.storyContext;
 
-  // Direct trigger to open User 2's story creation modal with User 1's story locked
   const handleOpenStudioFromMention = (e) => {
     e.stopPropagation();
     if (!mentionContext) return;
@@ -204,12 +269,10 @@ const MessageBubble = ({ message }) => {
     );
   }
 
-  // ULTRA-COMPACT INSTAGRAM STORY MENTION CARD (Slim & Minimal)
   if (isStoryMentionMessage && mentionContext) {
     return (
       <div className={`flex w-full my-1 ${isSender ? "justify-end" : "justify-start"}`}>
         <div className="w-[170px] rounded-xl overflow-hidden border border-white/10 bg-slate-900/90 shadow-md flex flex-col select-none">
-          {/* Top Label */}
           <div className="px-2 py-1 bg-white/5 flex items-center justify-between border-b border-white/5">
             <span className="text-[9px] font-bold text-pink-400 flex items-center gap-1">
               <FiAtSign size={9} /> Mention
@@ -219,7 +282,6 @@ const MessageBubble = ({ message }) => {
             </span>
           </div>
 
-          {/* Slim Story Preview (Height capped at 68px) */}
           <div
             className="w-full h-[68px] flex items-center justify-center p-1.5 relative overflow-hidden"
             style={{
@@ -232,7 +294,7 @@ const MessageBubble = ({ message }) => {
             {mentionContext.mediaType === "text" ? (
               <p
                 className="text-[9px] font-bold line-clamp-2 text-center leading-snug px-1"
-                style={{ color: mentionContext.textColor || "#ffffff" }}
+                style={{ color: mentionContext.textColor || "#ffffff", wordBreak: "break-all" }}
               >
                 "{mentionContext.text}"
               </p>
@@ -245,7 +307,6 @@ const MessageBubble = ({ message }) => {
             )}
           </div>
 
-          {/* Compact Action Button */}
           <button
             type="button"
             onClick={handleOpenStudioFromMention}
@@ -261,6 +322,14 @@ const MessageBubble = ({ message }) => {
 
   return (
     <div
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      style={{
+        touchAction: "pan-y",
+        transform: `translateX(${swipeOffset}px)`,
+        transition: swipeOffset === 0 ? "transform 0.2s ease" : "none",
+      }}
       className={`group relative flex w-full my-1.5 items-end gap-2 ${
         isSender ? "justify-end" : "justify-start"
       }`}
@@ -276,7 +345,8 @@ const MessageBubble = ({ message }) => {
 
       {/* Message Box */}
       <div
-        className={`relative max-w-[85%] sm:max-w-[65%] rounded-2xl px-3.5 py-2.5 shadow-md flex flex-col gap-1 transition-all ${
+        style={{ wordBreak: "break-all", overflowWrap: "anywhere", maxWidth: "85%" }}
+        className={`relative rounded-2xl px-3.5 py-2.5 shadow-md flex flex-col gap-1 transition-all ${
           isSender
             ? "theme-accent-bg text-white rounded-br-xs"
             : "theme-panel-bg theme-text border theme-border rounded-bl-xs"
@@ -291,7 +361,7 @@ const MessageBubble = ({ message }) => {
 
         {/* Story Reply / React Context Box */}
         {message.mediaType === "story_reply" && message.storyContext && (
-          <div className="p-2 rounded-xl bg-black/25 border border-white/20 mb-1 flex items-center gap-2.5">
+          <div className="p-2 rounded-xl bg-black/25 border border-white/20 mb-1 flex items-center gap-2.5 min-w-0">
             {message.storyContext.mediaUrl ? (
               <img
                 src={message.storyContext.mediaUrl}
@@ -317,13 +387,13 @@ const MessageBubble = ({ message }) => {
         {/* Quoted Standard Reply */}
         {message.replyTo && message.mediaType !== "story_reply" && (
           <div
-            className={`p-2 rounded-xl text-xs mb-1 border-l-4 flex flex-col ${
+            className={`p-2 rounded-xl text-xs mb-1 border-l-4 flex flex-col min-w-0 ${
               isSender
                 ? "bg-black/20 border-white/80 text-white/90"
                 : "theme-soft-bg border-sky-500 theme-text-muted"
             }`}
           >
-            <span className="font-bold text-[11px]">
+            <span className="font-bold text-[11px] truncate">
               {message.replyTo.sender?.fullName || "User"}
             </span>
             <span className="truncate text-[11px]">
@@ -336,7 +406,7 @@ const MessageBubble = ({ message }) => {
         )}
 
         {!isSender && isGroup && (
-          <span className="text-[11px] font-bold text-sky-500">
+          <span className="text-[11px] font-bold text-sky-500 truncate">
             {message.sender?.fullName || message.sender?.username}
           </span>
         )}
@@ -366,7 +436,7 @@ const MessageBubble = ({ message }) => {
 
         {/* Media: Audio */}
         {message.mediaUrl && message.mediaType === "audio" && (
-          <div className="flex items-center gap-2.5 p-1 my-0.5">
+          <div className="flex items-center gap-2.5 p-1 my-0.5 min-w-0">
             <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center shrink-0">
               <FiMusic size={14} />
             </div>
@@ -377,16 +447,16 @@ const MessageBubble = ({ message }) => {
         {/* Media: Document / Vault File */}
         {message.mediaUrl && message.mediaType === "document" && (
           <div
-            className={`p-2.5 rounded-xl border flex items-center justify-between gap-3 my-1 ${
+            className={`p-2.5 rounded-xl border flex items-center justify-between gap-3 my-1 min-w-0 ${
               isSender ? "bg-black/20 border-white/20" : "theme-soft-bg theme-border"
             }`}
           >
-            <div className="flex items-center gap-2.5 min-w-0">
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
               <div className="w-9 h-9 rounded-lg bg-sky-500/20 text-sky-400 flex items-center justify-center shrink-0">
                 {message.isVaultFile ? <FiCloud size={18} /> : <FiFileText size={18} />}
               </div>
-              <div className="flex flex-col min-w-0">
-                <span className="text-xs font-semibold truncate max-w-[140px] sm:max-w-[200px]">
+              <div className="flex flex-col min-w-0 flex-1">
+                <span className="text-xs font-semibold truncate">
                   {message.fileName || "Document.pdf"}
                 </span>
                 <span className="text-[10px] opacity-75 font-mono">
@@ -399,7 +469,7 @@ const MessageBubble = ({ message }) => {
               download={message.fileName || "download"}
               target="_blank"
               rel="noreferrer"
-              className={`p-2 rounded-lg transition ${
+              className={`p-2 rounded-lg transition shrink-0 ${
                 isSender
                   ? "bg-white/20 hover:bg-white/30 text-white"
                   : "theme-soft-bg hover:theme-accent-text theme-text"
@@ -413,9 +483,12 @@ const MessageBubble = ({ message }) => {
 
         {/* Poll Component */}
         {message.pollData && message.pollData.options && (
-          <div className="p-3 rounded-2xl bg-black/10 border border-white/10 my-1 flex flex-col gap-2.5">
-            <span className="text-xs font-bold leading-tight">
-              {message.pollData.question}
+          <div className="p-3 rounded-2xl bg-black/10 border border-white/10 my-1 flex flex-col gap-2.5 min-w-0">
+            <span
+              style={{ wordBreak: "break-all", overflowWrap: "anywhere" }}
+              className="text-xs font-bold leading-tight"
+            >
+              {formatLongText(message.pollData.question)}
             </span>
             <div className="flex flex-col gap-2">
               {message.pollData.options.map((opt, optIdx) => {
@@ -445,12 +518,15 @@ const MessageBubble = ({ message }) => {
                       className="absolute inset-y-0 left-0 bg-sky-500/30 transition-all duration-300"
                       style={{ width: `${percentage}%` }}
                     />
-                    <div className="relative flex items-center justify-between z-10">
-                      <span className="flex items-center gap-1.5">
-                        {hasVoted && <FiCheckCircle className="text-sky-400" size={13} />}
-                        {opt.text}
+                    <div className="relative flex items-center justify-between z-10 gap-2">
+                      <span
+                        style={{ wordBreak: "break-all", overflowWrap: "anywhere" }}
+                        className="flex items-center gap-1.5"
+                      >
+                        {hasVoted && <FiCheckCircle className="text-sky-400 shrink-0" size={13} />}
+                        {formatLongText(opt.text)}
                       </span>
-                      <span className="text-[10px] opacity-80 font-mono">
+                      <span className="text-[10px] opacity-80 font-mono shrink-0">
                         {votesCount} ({percentage}%)
                       </span>
                     </div>
@@ -463,8 +539,11 @@ const MessageBubble = ({ message }) => {
 
         {/* Plain Text Content */}
         {message.text && message.mediaType !== "story_reply" && (
-          <p className="text-xs sm:text-sm whitespace-pre-wrap break-words leading-relaxed">
-            {message.text}
+          <p
+            style={{ wordBreak: "break-all", overflowWrap: "anywhere" }}
+            className="text-xs sm:text-sm whitespace-pre-wrap leading-relaxed"
+          >
+            {formatLongText(message.text)}
           </p>
         )}
 
@@ -498,11 +577,14 @@ const MessageBubble = ({ message }) => {
           ref={menuRef}
           className={`absolute top-1.5 ${
             isSender ? "-left-16" : "-right-16"
-          } opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 z-30`}
+          } ${showMenu ? "opacity-100 flex" : "opacity-0 group-hover:opacity-100"} transition-opacity flex items-center gap-1 z-30`}
         >
           <button
             type="button"
-            onClick={() => setShowReactionPicker((prev) => !prev)}
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowReactionPicker((prev) => !prev);
+            }}
             className="p-1.5 rounded-full theme-soft-bg theme-text-muted hover:theme-text border theme-border shadow-sm transition"
             title="React"
           >
@@ -511,7 +593,10 @@ const MessageBubble = ({ message }) => {
 
           <button
             type="button"
-            onClick={() => setShowMenu((prev) => !prev)}
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowMenu((prev) => !prev);
+            }}
             className="p-1.5 rounded-full theme-soft-bg theme-text-muted hover:theme-text border theme-border shadow-sm transition"
             title="Options"
           >
@@ -532,6 +617,7 @@ const MessageBubble = ({ message }) => {
                   onClick={() => {
                     if (reactToMessage) reactToMessage(message._id, emoji);
                     setShowReactionPicker(false);
+                    setShowMenu(false);
                   }}
                   className="text-base hover:scale-125 transition-transform"
                 >

@@ -38,8 +38,8 @@ const AuthPage = () => {
   const [signUpStep, setSignUpStep] = useState(1); // 1 = Verify Email, 2 = Choose Username, 3 = Details & Password
 
   // Google Multi-Account Selector Modal States
-  const [googleModalData, setGoogleModalData] = useState(null); // { accounts, email, defaultAvatar, defaultName, credentialToken }
-  const [isGoogleNewUserFlow, setIsGoogleNewUserFlow] = useState(false); // New user registration via Google email
+  const [googleModalData, setGoogleModalData] = useState(null); 
+  const [isGoogleNewUserFlow, setIsGoogleNewUserFlow] = useState(false); 
   const [googleNewUsername, setGoogleNewUsername] = useState("");
   const [googleNewPassword, setGoogleNewPassword] = useState("");
   const [googleNewFullName, setGoogleNewFullName] = useState("");
@@ -50,10 +50,11 @@ const AuthPage = () => {
   const [identifier, setIdentifier] = useState("");
   const [signInPassword, setSignInPassword] = useState("");
 
-  // Step 1 Verification Fields
+  // Step 1 Verification Fields & Timer (2 Minutes = 120 Seconds)
   const [emailToVerify, setEmailToVerify] = useState("");
   const [emailOtp, setEmailOtp] = useState("");
   const [isEmailOtpSent, setIsEmailOtpSent] = useState(false);
+  const [secondsLeft, setSecondsLeft] = useState(120); 
 
   // Step 2 Username Validation
   const [usernameInput, setUsernameInput] = useState("");
@@ -80,6 +81,13 @@ const AuthPage = () => {
 
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // OTP Timer Effect
+  useEffect(() => {
+    if (!isEmailOtpSent || secondsLeft <= 0) return;
+    const timer = setTimeout(() => setSecondsLeft((s) => s - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [isEmailOtpSent, secondsLeft]);
 
   // Real-time Debounced Username Checker
   useEffect(() => {
@@ -133,7 +141,7 @@ const AuthPage = () => {
     }
   };
 
-  // Google Login Response Handler (Triggers modal or direct login)
+  // Google Login Response Handler
   const handleGoogleAuthResult = async (resData) => {
     if (resData?.hasExistingAccounts) {
       setGoogleModalData({
@@ -155,7 +163,6 @@ const AuthPage = () => {
     }
   };
 
-  // Select existing account from Google modal
   const handleSelectGoogleAccount = async (targetUserId, credentialToken) => {
     setLoading(true);
     try {
@@ -169,7 +176,6 @@ const AuthPage = () => {
     }
   };
 
-  // Create new account using Google Email
   const handleGoogleNewAccountSubmit = async (e) => {
     e.preventDefault();
     if (!googleNewUsername.trim() || !googleNewPassword.trim()) {
@@ -209,6 +215,7 @@ const AuthPage = () => {
       });
       toast.success(res.data.message || "OTP sent to your email!");
       setIsEmailOtpSent(true);
+      setSecondsLeft(120); // Reset timer to 120s (2 mins)
     } catch (err) {
       toast.error(err.response?.data?.message || "Failed to send email OTP");
     } finally {
@@ -543,6 +550,7 @@ const AuthPage = () => {
                         required
                       />
                     </div>
+                    
                     <button
                       type="submit"
                       disabled={loading}
@@ -550,6 +558,34 @@ const AuthPage = () => {
                     >
                       {loading ? "Verifying..." : "Verify OTP & Continue"}
                     </button>
+
+                    {/* Timer and Resend Option (Formatted as MM:SS) */}
+                    <div className="text-center text-xs text-slate-400 mt-1">
+                      {secondsLeft > 0 ? (
+                        <span>
+                          Resend code in{" "}
+                          <strong className="text-cyan-400">
+                            {Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, "0")}
+                          </strong>
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            setSecondsLeft(120);
+                            try {
+                              await api.post("/auth/send-email-otp", { email: emailToVerify.trim() });
+                              toast.success("New OTP sent successfully!");
+                            } catch (err) {
+                              toast.error("Failed to resend OTP");
+                            }
+                          }}
+                          className="text-cyan-400 hover:underline font-bold"
+                        >
+                          Resend code
+                        </button>
+                      )}
+                    </div>
                   </form>
                 )}
               </div>
@@ -578,7 +614,7 @@ const AuthPage = () => {
                       type="text"
                       value={usernameInput}
                       onChange={(e) => setUsernameInput(e.target.value.toLowerCase().replace(/[^a-z0-9_.]/g, ""))}
-                      placeholder="Full Name"
+                      placeholder="Username"
                       className={`w-full bg-transparent text-xs font-bold outline-none ${isDarkMode ? "text-white" : "text-slate-950"}`}
                       autoFocus
                     />
@@ -859,137 +895,6 @@ const AuthPage = () => {
           </span>
         </div>
       </div>
-
-      {/* GOOGLE MULTI-ACCOUNT SELECTOR POPUP MODAL */}
-      {googleModalData && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className={`w-full max-w-md rounded-3xl p-6 shadow-2xl border ${isDarkMode ? "bg-[#12151c] border-slate-800 text-white" : "bg-white border-slate-200 text-slate-900"}`}>
-            <h3 className="text-lg font-black mb-2 text-center">Choose an Account</h3>
-            <p className={`text-xs text-center mb-5 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
-              Multiple accounts are linked with <span className="font-bold text-cyan-400">{googleModalData.email}</span>. Select one to login or create a new account.
-            </p>
-
-            <div className="flex flex-col gap-3 max-h-64 overflow-y-auto mb-4 pr-1">
-              {googleModalData.accounts.map((acc) => (
-                <div key={acc._id} className={`flex items-center justify-between p-3 rounded-2xl border ${isDarkMode ? "bg-[#1a1e29] border-slate-800" : "bg-slate-50 border-slate-200"}`}>
-                  <div className="flex items-center gap-3">
-                    <img 
-                      src={acc.avatar || googleModalData.defaultAvatar || "https://api.dicebear.com/7.x/bottts/svg?seed=fallback"} 
-                      alt="Avatar" 
-                      className="w-10 h-10 rounded-full object-cover border border-cyan-400/40" 
-                    />
-                    <div>
-                      <h4 className="text-xs font-bold">{acc.fullName}</h4>
-                      <p className="text-[11px] text-cyan-400">@{acc.username}</p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={loading}
-                    onClick={() => handleSelectGoogleAccount(acc._id, googleModalData.credentialToken)}
-                    className="px-4 py-2 rounded-xl bg-cyan-400 text-slate-950 font-black text-xs shadow hover:opacity-90 transition"
-                  >
-                    Login
-                  </button>
-                </div>
-              ))}
-            </div>
-
-            <div className="flex flex-col gap-2 pt-2 border-t border-slate-800">
-              <button
-                type="button"
-                onClick={() => {
-                  const email = googleModalData.email;
-                  const name = googleModalData.defaultName;
-                  const pic = googleModalData.defaultAvatar;
-                  setGoogleModalData(null);
-                  setGoogleEmailVerified(email);
-                  setGoogleNewFullName(name || "");
-                  setGoogleAvatarUrl(pic || "");
-                  const base = email.split("@")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
-                  setGoogleNewUsername(`${base}_${Math.floor(100 + Math.random() * 900)}`);
-                  setIsGoogleNewUserFlow(true);
-                }}
-                className={`w-full py-2.5 rounded-2xl border text-xs font-bold transition ${isDarkMode ? "border-cyan-500/40 text-cyan-400 hover:bg-cyan-500/10" : "border-cyan-500 text-cyan-600 hover:bg-cyan-50"}`}
-              >
-                + Create New Account with this Email
-              </button>
-              <button
-                type="button"
-                onClick={() => setGoogleModalData(null)}
-                className="w-full py-2 rounded-xl text-xs font-medium text-slate-500 hover:text-slate-300"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* GOOGLE NEW USER ONBOARDING MODAL */}
-      {isGoogleNewUserFlow && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className={`w-full max-w-md rounded-3xl p-6 shadow-2xl border ${isDarkMode ? "bg-[#12151c] border-slate-800 text-white" : "bg-white border-slate-200 text-slate-900"}`}>
-            <h3 className="text-lg font-black mb-1 text-center">Complete Your Profile</h3>
-            <p className={`text-xs text-center mb-4 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
-              Set your username and password for <span className="font-bold text-cyan-400">{googleEmailVerified}</span>
-            </p>
-
-            <form onSubmit={handleGoogleNewAccountSubmit} className="flex flex-col gap-3.5">
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-bold">Full Name</label>
-                <input
-                  type="text"
-                  value={googleNewFullName}
-                  onChange={(e) => setGoogleNewFullName(e.target.value)}
-                  className={`px-3 py-2.5 rounded-2xl border text-xs outline-none ${isDarkMode ? "bg-[#1a1e29] border-slate-800" : "bg-slate-50 border-slate-300"}`}
-                  required
-                />
-              </div>
-
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-bold">Username</label>
-                <input
-                  type="text"
-                  value={googleNewUsername}
-                  onChange={(e) => setGoogleNewUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_.]/g, ""))}
-                  className={`px-3 py-2.5 rounded-2xl border text-xs outline-none ${isDarkMode ? "bg-[#1a1e29] border-slate-800" : "bg-slate-50 border-slate-300"}`}
-                  required
-                />
-              </div>
-
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-bold">Password (for future manual login)</label>
-                <input
-                  type="password"
-                  value={googleNewPassword}
-                  onChange={(e) => setGoogleNewPassword(e.target.value)}
-                  placeholder="Min 6 characters"
-                  className={`px-3 py-2.5 rounded-2xl border text-xs outline-none ${isDarkMode ? "bg-[#1a1e29] border-slate-800" : "bg-slate-50 border-slate-300"}`}
-                  required
-                />
-              </div>
-
-              <div className="flex gap-2 mt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsGoogleNewUserFlow(false)}
-                  className="w-1/3 py-2.5 rounded-2xl border border-slate-700 text-xs font-bold text-slate-400"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-2/3 py-2.5 rounded-2xl bg-cyan-400 text-slate-950 font-black text-xs hover:opacity-95 transition"
-                >
-                  {loading ? "Creating..." : "Create Account & Login 🎉"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

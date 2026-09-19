@@ -27,6 +27,7 @@ import {
   FiTrash2,
   FiVolumeX,
   FiSlash,
+  FiArchive,
 } from "react-icons/fi";
 import Avatar from "../common/Avatar";
 import StatusBar from "../status/StatusBar";

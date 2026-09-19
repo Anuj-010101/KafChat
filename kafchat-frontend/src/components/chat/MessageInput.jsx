@@ -53,11 +53,6 @@ const MessageInput = () => {
   const audioChunksRef = useRef([]);
   const timerRef = useRef(null);
 
-  const [pollQuestion, setPollQuestion] = useState("");
-  const [pollOptions, setPollOptions] = useState(["", ""]);
-  const [contactName, setContactName] = useState("");
-  const [contactPhone, setContactPhone] = useState("");
-
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [isUploadingBatch, setIsUploadingBatch] = useState(false);
 
@@ -70,7 +65,7 @@ const MessageInput = () => {
   const audioInputRef = useRef(null);
 
   const isVip = Boolean(user?.isVIP);
-  const maxVoiceDuration = isVip ? 300 : 60; // Free 60s / PRO 300s (5 min)
+  const maxVoiceDuration = isVip ? 300 : 60;
 
   // Close menus on outside click
   useEffect(() => {
@@ -95,14 +90,16 @@ const MessageInput = () => {
   const isGroup = activeChat?.isGroupChat;
   const isCloudVault = activeChat?.isSavedCloud;
   const currentUserId = (user?._id || user?.id)?.toString();
+  
+  // FIX: Defined otherUser properly here so it won't crash
+  const otherUser = activeChat?.participants?.find(
+    (p) => (p?._id || p)?.toString() !== currentUserId
+  );
+
   const isCurrentAdmin =
     isGroup &&
     (activeChat.groupAdmins?.some((a) => (a?._id || a)?.toString() === currentUserId) ||
       (activeChat.groupAdmin?._id || activeChat.groupAdmin)?.toString() === currentUserId);
-
-  const otherUser = activeChat?.participants?.find(
-    (p) => (p?._id || p)?.toString() !== currentUserId
-  );
 
   if (isGroup && activeChat?.onlyAdminsCanMessage && !isCurrentAdmin) {
     return (
@@ -290,44 +287,6 @@ const MessageInput = () => {
     }
   };
 
-  const handleSendPoll = async (e) => {
-    e.preventDefault();
-    const validOptions = pollOptions.filter((opt) => opt && opt.trim());
-    if (!pollQuestion.trim() || validOptions.length < 2) {
-      toast.error("Please add a question and at least 2 options");
-      return;
-    }
-
-    try {
-      await sendMessage({
-        text: `📊 Poll: ${pollQuestion.trim()}`,
-        mediaType: "poll",
-        pollData: {
-          question: pollQuestion.trim(),
-          options: validOptions.map((opt) => ({ text: opt.trim(), votes: [] })),
-        },
-      });
-
-      setPollQuestion("");
-      setPollOptions(["", ""]);
-      setShowPollModal(false);
-    } catch (err) {
-      console.error("Poll send error:", err);
-    }
-  };
-
-  const handleSendContact = async (e) => {
-    e.preventDefault();
-    if (!contactName.trim() || !contactPhone.trim()) return;
-    await sendMessage({
-      text: `👤 Contact Card:\nName: ${contactName.trim()}\nPhone: ${contactPhone.trim()}`,
-      mediaType: "none",
-    });
-    setContactName("");
-    setContactPhone("");
-    setShowContactModal(false);
-  };
-
   return (
     <div className="relative theme-panel-bg w-full">
       {/* Reply Quote Preview */}
@@ -435,7 +394,6 @@ const MessageInput = () => {
             </button>
           )}
 
-          {/* 1. Camera Snap */}
           <button
             type="button"
             onClick={() => {
@@ -450,7 +408,6 @@ const MessageInput = () => {
             <span className="text-[10px] theme-text font-medium">Camera</span>
           </button>
 
-          {/* 2. Photos & Videos Gallery */}
           <button
             type="button"
             onClick={() => multiMediaInputRef.current?.click()}
@@ -462,7 +419,6 @@ const MessageInput = () => {
             <span className="text-[10px] theme-text font-medium">Gallery</span>
           </button>
 
-          {/* 3. Documents */}
           <button
             type="button"
             onClick={() => multiDocInputRef.current?.click()}
@@ -474,7 +430,6 @@ const MessageInput = () => {
             <span className="text-[10px] theme-text font-medium">Docs</span>
           </button>
 
-          {/* 4. ZIPs & Archives */}
           <button
             type="button"
             onClick={() => multiDocInputRef.current?.click()}
@@ -486,7 +441,6 @@ const MessageInput = () => {
             <span className="text-[10px] theme-text font-medium">ZIPs</span>
           </button>
 
-          {/* 5. Audio Files */}
           <button
             type="button"
             onClick={() => audioInputRef.current?.click()}
@@ -498,7 +452,6 @@ const MessageInput = () => {
             <span className="text-[10px] theme-text font-medium">Audio</span>
           </button>
 
-          {/* 6. Location */}
           <button
             type="button"
             onClick={() => {
@@ -516,7 +469,6 @@ const MessageInput = () => {
             <span className="text-[10px] theme-text font-medium">Location</span>
           </button>
 
-          {/* 7. Contact Card */}
           <button
             type="button"
             onClick={() => {
@@ -531,7 +483,6 @@ const MessageInput = () => {
             <span className="text-[10px] theme-text font-medium">Contact</span>
           </button>
 
-          {/* 8. Interactive Poll */}
           <button
             type="button"
             onClick={() => {
@@ -620,10 +571,19 @@ const MessageInput = () => {
           </div>
 
           {/* Text Input */}
-          <input
-            type="text"
+          <textarea
+            rows={1}
             value={text}
             onChange={handleTextChange}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+                if (!isMobile && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }
+            }}
             placeholder={
               aiLoading
                 ? "⚡ AI thinking..."
@@ -633,7 +593,7 @@ const MessageInput = () => {
                 ? "Save notes, files..."
                 : "Type message or '@ai'..."
             }
-            className="flex-1 min-w-0 w-full theme-soft-bg border theme-border rounded-xl px-2.5 sm:px-3.5 py-2 text-xs sm:text-sm theme-text placeholder:theme-text-muted outline-none theme-accent-focus transition"
+            className="flex-1 min-w-0 w-full theme-soft-bg border theme-border rounded-xl px-2.5 sm:px-3.5 py-2 text-xs sm:text-sm theme-text placeholder:theme-text-muted outline-none theme-accent-focus transition resize-none max-h-28 overflow-y-auto"
           />
 
           {/* Send / Mic Button */}

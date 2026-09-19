@@ -48,6 +48,12 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
   const [editModalMsg, setEditModalMsg] = useState(null);
   const [editText, setEditText] = useState("");
 
+  // Swipe & Long Press states for mobile gesture support
+  const [swipeOffsets, setSwipeOffsets] = useState({});
+  const touchStartX = useRef(0);
+  const touchStartY = useRef(0);
+  const longPressTimer = useRef(null);
+
   const menuContainerRef = useRef(null);
   const currentUserId = (user?._id || user?.id)?.toString();
   const isSelfChat = Boolean(activeChat?.isSelfChat);
@@ -90,7 +96,6 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
 
     activeSocket.on("screenshot_alert", handleScreenshotAlert);
 
-    // Native browser shortcut detection (PrintScreen)
     const handleKeyDown = (e) => {
       if (e.key === "PrintScreen" || (e.ctrlKey && e.shiftKey && e.key === "S")) {
         if (activeChat?._id) {
@@ -109,6 +114,50 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [activeChat?._id, user?.username, currentUserIsVIP, socket]);
+
+  // Touch handlers for mobile Slide-to-Reply and Long-press
+  const handleTouchStart = (msgId, e) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+
+    if (longPressTimer.current) clearTimeout(longPressTimer.current);
+
+    longPressTimer.current = setTimeout(() => {
+      setActiveMenuMsgId(msgId);
+      setActiveReactionMsgId(null);
+      if (navigator.vibrate) navigator.vibrate(50);
+    }, 500);
+  };
+
+  const handleTouchMove = (msgId, e) => {
+    const currentX = e.touches[0].clientX;
+    const currentY = e.touches[0].clientY;
+    const diffX = currentX - touchStartX.current;
+    const diffY = currentY - touchStartY.current;
+
+    if (Math.abs(diffY) > 15 || Math.abs(diffY) > Math.abs(diffX)) {
+      if (longPressTimer.current) clearTimeout(longPressTimer.current);
+      return;
+    }
+
+    if (Math.abs(diffX) > 10 && longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+    }
+
+    if (diffX > 0 && diffX < 120) {
+      setSwipeOffsets((prev) => ({ ...prev, [msgId]: diffX }));
+    }
+  };
+
+  const handleTouchEnd = (msg, e) => {
+    if (longPressTimer.current) clearTimeout(longPressTimer.current);
+    const offset = swipeOffsets[msg._id] || 0;
+
+    if (offset > 55) {
+      setReplyingMessage(msg);
+    }
+    setSwipeOffsets((prev) => ({ ...prev, [msg._id]: 0 }));
+  };
 
   const handleOpenStoryContext = (statusId) => {
     if (!statusId) return;
@@ -257,6 +306,7 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
         const isHovered = hoveredMsgId === msg._id;
         const isMenuOpen = activeMenuMsgId === msg._id;
         const isReactionOpen = activeReactionMsgId === msg._id;
+        const currentSwipeOffset = swipeOffsets[msg._id] || 0;
 
         // System Notification
         if (msg.text && msg.text.startsWith("⏱️")) {
@@ -336,6 +386,14 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
             key={msg._id}
             onMouseEnter={() => setHoveredMsgId(msg._id)}
             onMouseLeave={() => setHoveredMsgId(null)}
+            onTouchStart={(e) => handleTouchStart(msg._id, e)}
+            onTouchMove={(e) => handleTouchMove(msg._id, e)}
+            onTouchEnd={(e) => handleTouchEnd(msg, e)}
+            style={{
+              touchAction: "pan-y",
+              transform: `translateX(${currentSwipeOffset}px)`,
+              transition: currentSwipeOffset === 0 ? "transform 0.2s ease" : "none",
+            }}
             className={`flex flex-col group relative ${isMe ? "items-end" : "items-start"}`}
           >
             {activeChat?.isGroupChat && !isMe && msg.sender?.fullName && (
@@ -359,7 +417,7 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
               )}
 
               <div
-                className={`relative px-3 py-2 rounded-2xl text-xs sm:text-sm shadow-sm transition-all ${
+                className={`relative px-3 py-2 rounded-2xl text-xs sm:text-sm shadow-sm transition-all min-w-0 ${
                   isMe
                     ? "theme-accent-bg text-white rounded-br-xs"
                     : "theme-soft-bg theme-text rounded-bl-xs border theme-border"
@@ -558,7 +616,7 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
                 )}
 
                 {msg.text && !msg.storyContext && (
-                  <p className="whitespace-pre-wrap break-words leading-relaxed">{msg.text}</p>
+                  <p className="whitespace-pre-wrap break-all [overflow-wrap:anywhere] leading-relaxed">{msg.text}</p>
                 )}
 
                 <div
@@ -586,7 +644,7 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
               </div>
 
               {(isHovered || isMenuOpen || isReactionOpen) && (
-                <div className="flex items-center gap-0.5 theme-panel-bg border theme-border rounded-xl p-0.5 shadow-md animate-fadeIn z-20">
+                <div className="flex items-center gap-0.5 theme-panel-bg border theme-border rounded-xl p-0.5 shadow-md animate-fadeIn z-25">
                   <button
                     type="button"
                     onClick={() => setReplyingMessage(msg)}
