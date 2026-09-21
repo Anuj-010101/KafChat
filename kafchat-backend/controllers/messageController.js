@@ -34,16 +34,8 @@ exports.getMessages = async (req, res) => {
       return res.status(403).json({ success: false, message: "Not authorized to view messages in this chat" });
     }
 
-    // Auto mark all unread messages as read
-    await Message.updateMany(
-      {
-        chatId: targetChatId,
-        readBy: { $ne: userId },
-      },
-      {
-        $addToSet: { readBy: userId, deliveredTo: userId },
-      }
-    );
+    // NOTE: Chat khulte hi automatic read mark karne wali query yahan se hata di gayi hai,
+    // taaki blue tick tabhi ho jab user explicitly markAsRead API call kare!
 
     // Auto cleanup timed disappearing messages
     if (chat.disappearingTimer && ["24h", "7d", "90d"].includes(chat.disappearingTimer)) {
@@ -173,7 +165,7 @@ exports.sendMessage = async (req, res) => {
       forwardedFrom: forwardedFrom || null,
       isViewOnce: Boolean(isViewOnce),
       storyContext: storyContext || null,
-      readBy: [senderId],
+      readBy: [{ user: senderId, readAt: new Date() }],
     });
 
     const populatedMessage = await Message.findById(newMessage._id)
@@ -242,7 +234,7 @@ exports.uploadBatchFiles = async (req, res) => {
         fileName: uploadedData.fileName,
         fileSizeFormatted: formatBytes(uploadedData.fileSize),
         isVaultFile: true,
-        readBy: [senderId],
+        readBy: [{ user: senderId, readAt: new Date() }],
       });
 
       const populated = await Message.findById(msg._id).populate(
@@ -363,18 +355,37 @@ exports.markAsRead = async (req, res) => {
 
     const targetChatId = new mongoose.Types.ObjectId(chatId);
 
-    await Message.updateMany(
-      {
-        chatId: targetChatId,
-        readBy: { $ne: userId },
-      },
-      {
-        $addToSet: { readBy: userId, deliveredTo: userId },
-      }
-    );
+    // Saare messages nikaalein jo is chat me hain aur sender aap nahi hain
+    const messages = await Message.find({
+      chatId: targetChatId,
+      sender: { $ne: userId },
+    });
 
-    return res.status(200).json({ success: true, message: "Messages marked read" });
+    for (const msg of messages) {
+      if (!msg.readBy) msg.readBy = [];
+      
+      // Check karein ki user pehle se readBy me hai ya nahi (chahe object ho ya ID)
+      const alreadyRead = msg.readBy.some((r) => {
+        const rUserId = (r?.user?._id || r?.user || r)?.toString();
+        return rUserId && rUserId === userId.toString();
+      });
+
+      if (!alreadyRead) {
+        msg.readBy.push({ user: userId, readAt: new Date() });
+      }
+
+      if (!msg.deliveredTo) msg.deliveredTo = [];
+      const alreadyDelivered = msg.deliveredTo.some((d) => (d?._id || d)?.toString() === userId.toString());
+      if (!alreadyDelivered) {
+        msg.deliveredTo.push(userId);
+      }
+
+      await msg.save();
+    }
+
+    return res.status(200).json({ success: true, message: "Messages marked read successfully" });
   } catch (error) {
+    console.error("markAsRead error:", error);
     return res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -532,18 +543,30 @@ exports.reactToMessage = async (req, res) => {
     const message = await Message.findById(messageId);
     if (!message) return res.status(404).json({ success: false, message: "Message not found" });
 
-    if (!message.reactions) message.reactions = [];
+    const existingIndex = message.reactions.findIndex(
+      (r) => r.user.toString() === userId.toString() && r.emoji === emoji
+    );
 
-    message.reactions = message.reactions.filter((r) => r.user.toString() !== userId.toString());
-
-    if (emoji) {
+    if (existingIndex > -1) {
+      message.reactions.splice(existingIndex, 1);
+    } else {
+      message.reactions = message.reactions.filter(
+        (r) => r.user.toString() !== userId.toString()
+      );
       message.reactions.push({ user: userId, emoji });
     }
 
     await message.save();
-    return res.status(200).json({ success: true, reactions: message.reactions });
-  } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    
+    const updatedMessage = await Message.findById(messageId).populate("reactions.user", "fullName avatar");
+
+    return res.status(200).json({
+      success: true,
+      reactions: updatedMessage.reactions,
+    });
+  } 
+  catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
   }
 };
 
@@ -564,7 +587,7 @@ exports.searchMessages = async (req, res) => {
       chatId: targetChatId,
       deletedBy: { $ne: userId },
       deletedForEveryone: { $ne: true },
-      text: { $regex: query.trim(), $options: "i" },
+      text: { $regex: query.trim(),$options: "i" },
     })
       .populate("sender", "fullName username avatar profilePhotos")
       .sort({ createdAt: -1 });

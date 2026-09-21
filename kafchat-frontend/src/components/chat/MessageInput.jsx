@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import {
   FiPlus,
   FiSmile,
@@ -17,12 +17,16 @@ import {
   FiLayers,
   FiCloud,
   FiZap,
+  FiPhone,
+  FiSearch,
 } from "react-icons/fi";
 import EmojiPicker, { Theme } from "emoji-picker-react";
 import toast from "react-hot-toast";
 import BitmojiStickerModal from "./BitmojiStickerModal";
 import CameraStudioModal from "../camera/CameraStudioModal";
+import Avatar from "../common/Avatar";
 import api from "../../services/api";
+import { userService } from "../../services/userService";
 import { useChat } from "../../hooks/useChat";
 import { useAuth } from "../../hooks/useAuth";
 
@@ -42,9 +46,23 @@ const MessageInput = () => {
   const [showEmoji, setShowEmoji] = useState(false);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [showPollModal, setShowPollModal] = useState(false);
-  const [showContactModal, setShowContactModal] = useState(false);
   const [showStickerModal, setShowStickerModal] = useState(false);
   const [showCameraStudio, setShowCameraStudio] = useState(false);
+
+  // Dual-Option Contact Sharing States
+  const [showContactChoiceModal, setShowContactChoiceModal] = useState(false);
+  const [showKafChatContactsModal, setShowKafChatContactsModal] = useState(false);
+  const [showPhoneContactFormModal, setShowPhoneContactFormModal] = useState(false);
+  
+  const [kafchatUsers, setKafchatUsers] = useState([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [contactSearchQuery, setContactSearchQuery] = useState(""); // KafChat Search Query
+  const [manualContactName, setManualContactName] = useState("");
+  const [manualContactPhone, setManualContactPhone] = useState("");
+
+  // Poll Form States
+  const [pollQuestion, setPollQuestion] = useState("");
+  const [pollOptions, setPollOptions] = useState(["", ""]);
 
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -66,8 +84,8 @@ const MessageInput = () => {
 
   const isVip = Boolean(user?.isVIP);
   const maxVoiceDuration = isVip ? 300 : 60;
+  const currentUserId = (user?._id || user?.id)?.toString();
 
-  // Close menus on outside click
   useEffect(() => {
     const handleClickOutside = (e) => {
       if (attachMenuRef.current && !attachMenuRef.current.contains(e.target)) {
@@ -89,9 +107,7 @@ const MessageInput = () => {
 
   const isGroup = activeChat?.isGroupChat;
   const isCloudVault = activeChat?.isSavedCloud;
-  const currentUserId = (user?._id || user?.id)?.toString();
   
-  // FIX: Defined otherUser properly here so it won't crash
   const otherUser = activeChat?.participants?.find(
     (p) => (p?._id || p)?.toString() !== currentUserId
   );
@@ -210,6 +226,129 @@ const MessageInput = () => {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
       clearInterval(timerRef.current);
+    }
+  };
+
+  // Poll Submit Handler
+  const handleCreatePoll = async (e) => {
+    e.preventDefault();
+    if (!pollQuestion.trim()) {
+      toast.error("Please enter a poll question");
+      return;
+    }
+    const validOptions = pollOptions.filter((opt) => opt.trim().length > 0);
+    if (validOptions.length < 2) {
+      toast.error("Please provide at least 2 options");
+      return;
+    }
+
+    try {
+      await sendMessage({
+        text: `📊 Poll: ${pollQuestion}`,
+        mediaType: "poll",
+        pollData: {
+          question: pollQuestion.trim(),
+          options: validOptions.map((opt) => ({ text: opt.trim(), votes: [] })),
+        },
+      });
+      setShowPollModal(false);
+      setPollQuestion("");
+      setPollOptions(["", ""]);
+      toast.success("Poll created successfully! 📊");
+    } catch {
+      toast.error("Failed to create poll");
+    }
+  };
+
+  // Fetch KafChat Users for Contact Sharing
+  const fetchKafChatContacts = async () => {
+    setShowContactChoiceModal(false);
+    setShowKafChatContactsModal(true);
+    setLoadingUsers(true);
+    setContactSearchQuery("");
+    try {
+      const { data } = await userService.getSuggestions();
+      const list = data?.suggestions || data?.users || (Array.isArray(data) ? data : []);
+      setKafchatUsers(list.filter((u) => (u._id || u.id)?.toString() !== currentUserId));
+    } catch {
+      toast.error("Failed to load KafChat contacts");
+    } finally {
+      setLoadingUsers(false);
+    }
+  };
+
+  // Filtered KafChat Users based on Search Input
+  const filteredKafChatUsers = useMemo(() => {
+    if (!contactSearchQuery.trim()) return kafchatUsers;
+    const q = contactSearchQuery.toLowerCase().trim();
+    return kafchatUsers.filter(
+      (u) =>
+        u.fullName?.toLowerCase().includes(q) ||
+        u.username?.toLowerCase().includes(q)
+    );
+  }, [kafchatUsers, contactSearchQuery]);
+
+  const handleSendKafChatContact = async (selectedUser) => {
+    try {
+      await sendMessage({
+        text: `👤 KafChat Contact:\nName: ${selectedUser.fullName}\nUsername: @${selectedUser.username}`,
+        mediaType: "none",
+      });
+      setShowKafChatContactsModal(false);
+      toast.success(`Shared @${selectedUser.username}'s contact!`);
+    } catch {
+      toast.error("Failed to share contact");
+    }
+  };
+
+  // Native Device Contacts Picker API Handler
+  const handleNativePhoneContactsPicker = async () => {
+    setShowContactChoiceModal(false);
+    if ("contacts" in navigator && "select" in navigator.contacts) {
+      try {
+        const props = ["name", "tel"];
+        const opts = { multiple: false };
+        const contacts = await navigator.contacts.select(props, opts);
+        
+        if (contacts && contacts.length > 0) {
+          const contact = contacts[0];
+          const name = contact.name?.[0] || "Unknown";
+          const phone = contact.tel?.[0] || "No Number";
+
+          await sendMessage({
+            text: `📞 Phone Contact:\nName: ${name}\nPhone: ${phone}`,
+            mediaType: "none",
+          });
+          toast.success("Phone contact shared successfully!");
+          return;
+        }
+      } catch (err) {
+        console.warn("Native contact picker error or cancelled:", err);
+      }
+    }
+    
+    // Fallback to manual form if native API is not supported or declined
+    setShowPhoneContactFormModal(true);
+  };
+
+  const handleSendManualPhoneContact = async (e) => {
+    e.preventDefault();
+    if (!manualContactName.trim() || !manualContactPhone.trim()) {
+      toast.error("Please enter both name and phone number");
+      return;
+    }
+
+    try {
+      await sendMessage({
+        text: `📞 Phone Contact:\nName: ${manualContactName.trim()}\nPhone: ${manualContactPhone.trim()}`,
+        mediaType: "none",
+      });
+      setShowPhoneContactFormModal(false);
+      setManualContactName("");
+      setManualContactPhone("");
+      toast.success("Phone contact shared successfully!");
+    } catch {
+      toast.error("Failed to share phone contact");
     }
   };
 
@@ -473,7 +612,7 @@ const MessageInput = () => {
             type="button"
             onClick={() => {
               setShowAttachMenu(false);
-              setShowContactModal(true);
+              setShowContactChoiceModal(true);
             }}
             className="flex flex-col items-center gap-1.5 p-1 rounded-2xl hover:theme-soft-bg transition text-blue-500 group"
           >
@@ -528,7 +667,6 @@ const MessageInput = () => {
         </div>
       ) : (
         <form onSubmit={handleSend} className="flex items-center gap-1 w-full max-w-full">
-          {/* Action Icons */}
           <div className="flex items-center shrink-0">
             <button
               type="button"
@@ -570,7 +708,6 @@ const MessageInput = () => {
             </button>
           </div>
 
-          {/* Text Input */}
           <textarea
             rows={1}
             value={text}
@@ -596,7 +733,6 @@ const MessageInput = () => {
             className="flex-1 min-w-0 w-full theme-soft-bg border theme-border rounded-xl px-2.5 sm:px-3.5 py-2 text-xs sm:text-sm theme-text placeholder:theme-text-muted outline-none theme-accent-focus transition resize-none max-h-28 overflow-y-auto"
           />
 
-          {/* Send / Mic Button */}
           <div className="shrink-0 pl-0.5">
             {text.trim() || selectedFiles.length > 0 ? (
               <button
@@ -622,6 +758,297 @@ const MessageInput = () => {
             )}
           </div>
         </form>
+      )}
+
+      {/* 🟢 1. CONTACT CHOICE POPUP MODAL */}
+      {showContactChoiceModal && (
+        <div
+          className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fadeIn"
+          onClick={() => setShowContactChoiceModal(false)}
+        >
+          <div
+            className="w-full max-w-xs theme-panel-bg border theme-border rounded-3xl p-5 shadow-2xl flex flex-col gap-3 animate-bubbleIn"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-2 border-b theme-border">
+              <h4 className="text-sm font-bold theme-text flex items-center gap-2">
+                <FiUser className="text-blue-500" /> Share Contact
+              </h4>
+              <button
+                type="button"
+                onClick={() => setShowContactChoiceModal(false)}
+                className="theme-text-muted hover:theme-text cursor-pointer"
+              >
+                <FiX size={18} />
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-2 mt-1">
+              <button
+                type="button"
+                onClick={fetchKafChatContacts}
+                className="w-full p-3 rounded-2xl theme-soft-bg border theme-border flex items-center gap-3 hover:theme-accent-tint transition text-left group"
+              >
+                <div className="w-10 h-10 rounded-xl theme-accent-bg text-white flex items-center justify-center shadow-sm">
+                  <FiUser size={18} />
+                </div>
+                <div>
+                  <span className="text-xs font-bold theme-text block group-hover:theme-accent-text">KafChat Contacts</span>
+                  <span className="text-[10px] theme-text-muted">Choose from registered users</span>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleNativePhoneContactsPicker}
+                className="w-full p-3 rounded-2xl theme-soft-bg border theme-border flex items-center gap-3 hover:theme-accent-tint transition text-left group"
+              >
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-500 flex items-center justify-center shadow-sm">
+                  <FiPhone size={18} />
+                </div>
+                <div>
+                  <span className="text-xs font-bold theme-text block group-hover:text-emerald-500">Phone Contacts</span>
+                  <span className="text-[10px] theme-text-muted">Pick from device or enter manually</span>
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 👥 2. KAFCHAT CONTACTS DIRECTORY MODAL (With Search & Real DPs) */}
+      {showKafChatContactsModal && (
+        <div
+          className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fadeIn"
+          onClick={() => setShowKafChatContactsModal(false)}
+        >
+          <div
+            className="w-full max-w-sm theme-panel-bg border theme-border rounded-3xl p-5 shadow-2xl flex flex-col gap-3 max-h-[85vh] animate-bubbleIn"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-2 border-b theme-border">
+              <h4 className="text-sm font-bold theme-text flex items-center gap-2">
+                <FiUser className="text-blue-500" /> KafChat Users Directory
+              </h4>
+              <button
+                type="button"
+                onClick={() => setShowKafChatContactsModal(false)}
+                className="theme-text-muted hover:theme-text cursor-pointer"
+              >
+                <FiX size={18} />
+              </button>
+            </div>
+
+            {/* Search Bar for KafChat Contacts */}
+            <div className="flex items-center gap-2 px-3 py-2 theme-soft-bg border theme-border rounded-xl text-xs">
+              <FiSearch className="theme-text-muted shrink-0" size={14} />
+              <input
+                type="text"
+                placeholder="Search by name or username..."
+                value={contactSearchQuery}
+                onChange={(e) => setContactSearchQuery(e.target.value)}
+                className="w-full bg-transparent theme-text outline-none placeholder:theme-text-muted"
+                autoFocus
+              />
+              {contactSearchQuery && (
+                <button type="button" onClick={() => setContactSearchQuery("")} className="theme-text-muted hover:theme-text">
+                  <FiX size={14} />
+                </button>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-2 overflow-y-auto max-h-60 scrollbar-thin">
+              {loadingUsers ? (
+                <div className="py-8 text-center">
+                  <div className="w-6 h-6 mx-auto rounded-full border-2 theme-accent-border border-t-transparent animate-spin" />
+                </div>
+              ) : filteredKafChatUsers.length === 0 ? (
+                <div className="py-8 text-center text-xs theme-text-muted">No users found.</div>
+              ) : (
+                filteredKafChatUsers.map((u) => (
+                  <div
+                    key={u._id || u.id}
+                    onClick={() => handleSendKafChatContact(u)}
+                    className="p-2.5 rounded-2xl theme-soft-bg border theme-border flex items-center justify-between gap-3 cursor-pointer hover:theme-accent-tint transition"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      {/* Real DP Avatar */}
+                      <Avatar src={u.avatar} alt={u.fullName} size="sm" />
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-xs font-bold theme-text truncate">{u.fullName}</span>
+                        <span className="text-[10px] theme-text-muted font-mono truncate">@{u.username}</span>
+                      </div>
+                    </div>
+                    <span className="px-2.5 py-1 rounded-xl theme-accent-bg text-white text-[10px] font-bold shrink-0">
+                      Share
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 📞 3. PHONE / MANUAL CONTACT FORM MODAL (Fallback) */}
+      {showPhoneContactFormModal && (
+        <div
+          className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fadeIn"
+          onClick={() => setShowPhoneContactFormModal(false)}
+        >
+          <div
+            className="w-full max-w-sm theme-panel-bg border theme-border rounded-3xl p-5 shadow-2xl flex flex-col gap-4 animate-bubbleIn"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-2 border-b theme-border">
+              <h4 className="text-sm font-bold theme-text flex items-center gap-2">
+                <FiPhone className="text-emerald-500" /> Enter Phone Contact
+              </h4>
+              <button
+                type="button"
+                onClick={() => setShowPhoneContactFormModal(false)}
+                className="theme-text-muted hover:theme-text cursor-pointer"
+              >
+                <FiX size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSendManualPhoneContact} className="flex flex-col gap-3">
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] font-semibold theme-text-muted">Contact Name</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Rahul Sharma"
+                  value={manualContactName}
+                  onChange={(e) => setManualContactName(e.target.value)}
+                  className="w-full p-2.5 text-xs rounded-xl theme-soft-bg border theme-border theme-text outline-none"
+                  autoFocus
+                />
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] font-semibold theme-text-muted">Phone Number</label>
+                <input
+                  type="tel"
+                  placeholder="e.g. +91 9876543210"
+                  value={manualContactPhone}
+                  onChange={(e) => setManualContactPhone(e.target.value)}
+                  className="w-full p-2.5 text-xs rounded-xl theme-soft-bg border theme-border theme-text outline-none font-mono"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 mt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPhoneContactFormModal(false)}
+                  className="px-3 py-1.5 rounded-xl text-xs font-semibold theme-soft-bg theme-text"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow"
+                >
+                  Share Contact
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 📊 POLL CREATION MODAL */}
+      {showPollModal && (
+        <div
+          className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fadeIn"
+          onClick={() => setShowPollModal(false)}
+        >
+          <div
+            className="w-full max-w-sm theme-panel-bg border theme-border rounded-3xl p-5 shadow-2xl flex flex-col gap-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-2 border-b theme-border">
+              <h4 className="text-sm font-bold theme-text flex items-center gap-2">
+                <FiBarChart2 className="text-yellow-500" /> Create a Poll
+              </h4>
+              <button
+                type="button"
+                onClick={() => setShowPollModal(false)}
+                className="theme-text-muted hover:theme-text cursor-pointer"
+              >
+                <FiX size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreatePoll} className="flex flex-col gap-3">
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] font-semibold theme-text-muted">Poll Question</label>
+                <input
+                  type="text"
+                  placeholder="Ask a question..."
+                  value={pollQuestion}
+                  onChange={(e) => setPollQuestion(e.target.value)}
+                  className="w-full p-2.5 text-xs rounded-xl theme-soft-bg border theme-border theme-text outline-none"
+                  autoFocus
+                />
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <label className="text-[11px] font-semibold theme-text-muted">Options</label>
+                {pollOptions.map((opt, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder={`Option ${idx + 1}`}
+                      value={opt}
+                      onChange={(e) => {
+                        const newOpts = [...pollOptions];
+                        newOpts[idx] = e.target.value;
+                        setPollOptions(newOpts);
+                      }}
+                      className="w-full p-2 text-xs rounded-xl theme-soft-bg border theme-border theme-text outline-none"
+                    />
+                    {pollOptions.length > 2 && (
+                      <button
+                        type="button"
+                        onClick={() => setPollOptions(pollOptions.filter((_, i) => i !== idx))}
+                        className="text-red-500 p-1 hover:bg-red-500/10 rounded-lg"
+                      >
+                        <FiX size={14} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+
+                {pollOptions.length < 6 && (
+                  <button
+                    type="button"
+                    onClick={() => setPollOptions([...pollOptions, ""])}
+                    className="text-xs font-semibold theme-accent-text hover:underline mt-1 text-left"
+                  >
+                    + Add Option
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 mt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPollModal(false)}
+                  className="px-3 py-1.5 rounded-xl text-xs font-semibold theme-soft-bg theme-text"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 rounded-xl text-xs font-semibold theme-accent-bg text-white shadow"
+                >
+                  Send Poll
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       {/* Bitmoji Modal */}

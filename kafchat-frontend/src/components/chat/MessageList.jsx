@@ -19,7 +19,12 @@ import {
   FiShare2,
   FiPlay,
   FiAtSign,
+  FiInfo,
+  FiBookmark,
+  FiPlus,
+  FiBarChart2,
 } from "react-icons/fi";
+import EmojiPicker, { Theme } from "emoji-picker-react";
 import Avatar from "../common/Avatar";
 import { useAuth } from "../../hooks/useAuth";
 import { useChat } from "../../hooks/useChat";
@@ -44,15 +49,12 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
   const [hoveredMsgId, setHoveredMsgId] = useState(null);
   const [activeMenuMsgId, setActiveMenuMsgId] = useState(null);
   const [activeReactionMsgId, setActiveReactionMsgId] = useState(null);
+  const [showFullEmojiPickerMsgId, setShowFullEmojiPickerMsgId] = useState(null);
+  const [pollModalMsg, setPollModalMsg] = useState(null); // 📊 Poll Results Modal state
   const [deleteModalMsg, setDeleteModalMsg] = useState(null);
   const [editModalMsg, setEditModalMsg] = useState(null);
+  const [infoModalMsg, setInfoModalMsg] = useState(null);
   const [editText, setEditText] = useState("");
-
-  // Swipe & Long Press states for mobile gesture support
-  const [swipeOffsets, setSwipeOffsets] = useState({});
-  const touchStartX = useRef(0);
-  const touchStartY = useRef(0);
-  const longPressTimer = useRef(null);
 
   const menuContainerRef = useRef(null);
   const currentUserId = (user?._id || user?.id)?.toString();
@@ -61,7 +63,15 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
   const isGroup = Boolean(activeChat?.isGroupChat);
   const currentUserIsVIP = Boolean(user?.isVIP || isVip);
 
-  // Close context menu on outside click
+  const longPressTimer = useRef(null);
+  const touchStartX = useRef(0);
+  const touchCurrentX = useRef(0);
+  const [slidingMsgId, setSlidingMsgId] = useState(null);
+  const [slideOffset, setSlideOffset] = useState(0);
+
+  const pinnedMessages = messages.filter((m) => m.isPinned);
+  const [currentPinnedIndex, setCurrentPinnedIndex] = useState(0);
+
   useEffect(() => {
     const handleOutsideClick = (e) => {
       if (menuContainerRef.current && !menuContainerRef.current.contains(e.target)) {
@@ -73,7 +83,6 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
     return () => document.removeEventListener("mousedown", handleOutsideClick);
   }, []);
 
-  // 📸 PRO/VIP SNAPCHAT SCREENSHOT & RECORDING LISTENER
   useEffect(() => {
     const activeSocket = socket || window.socket;
     if (!activeSocket) return;
@@ -95,33 +104,17 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
     };
 
     activeSocket.on("screenshot_alert", handleScreenshotAlert);
-
-    const handleKeyDown = (e) => {
-      if (e.key === "PrintScreen" || (e.ctrlKey && e.shiftKey && e.key === "S")) {
-        if (activeChat?._id) {
-          activeSocket.emit("screenshot_taken", {
-            chatId: activeChat._id,
-            username: user?.username,
-            captureType: "screenshot",
-          });
-        }
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
     return () => {
       activeSocket.off("screenshot_alert", handleScreenshotAlert);
-      window.removeEventListener("keydown", handleKeyDown);
     };
   }, [activeChat?._id, user?.username, currentUserIsVIP, socket]);
 
-  // Touch handlers for mobile Slide-to-Reply and Long-press
   const handleTouchStart = (msgId, e) => {
-    touchStartX.current = e.touches[0].clientX;
-    touchStartY.current = e.touches[0].clientY;
+    touchStartX.current = e.touches ? e.touches[0].clientX : e.clientX;
+    touchCurrentX.current = touchStartX.current;
+    setSlidingMsgId(msgId);
 
     if (longPressTimer.current) clearTimeout(longPressTimer.current);
-
     longPressTimer.current = setTimeout(() => {
       setActiveMenuMsgId(msgId);
       setActiveReactionMsgId(null);
@@ -129,34 +122,35 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
     }, 500);
   };
 
-  const handleTouchMove = (msgId, e) => {
-    const currentX = e.touches[0].clientX;
-    const currentY = e.touches[0].clientY;
-    const diffX = currentX - touchStartX.current;
-    const diffY = currentY - touchStartY.current;
-
-    if (Math.abs(diffY) > 15 || Math.abs(diffY) > Math.abs(diffX)) {
-      if (longPressTimer.current) clearTimeout(longPressTimer.current);
-      return;
-    }
-
-    if (Math.abs(diffX) > 10 && longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-    }
-
-    if (diffX > 0 && diffX < 120) {
-      setSwipeOffsets((prev) => ({ ...prev, [msgId]: diffX }));
+  const handleTouchMove = (e) => {
+    touchCurrentX.current = e.touches ? e.touches[0].clientX : e.clientX;
+    const diff = touchCurrentX.current - touchStartX.current;
+    if (Math.abs(diff) <= 80) {
+      setSlideOffset(diff);
     }
   };
 
-  const handleTouchEnd = (msg, e) => {
+  const handleTouchEnd = (msg) => {
     if (longPressTimer.current) clearTimeout(longPressTimer.current);
-    const offset = swipeOffsets[msg._id] || 0;
-
-    if (offset > 55) {
+    const diff = touchCurrentX.current - touchStartX.current;
+    
+    if (Math.abs(diff) > 50) {
       setReplyingMessage(msg);
+      if (navigator.vibrate) navigator.vibrate(30);
     }
-    setSwipeOffsets((prev) => ({ ...prev, [msg._id]: 0 }));
+    setSlidingMsgId(null);
+    setSlideOffset(0);
+    touchStartX.current = 0;
+    touchCurrentX.current = 0;
+  };
+
+  const scrollToMessage = (msgId) => {
+    const el = document.getElementById(`msg-${msgId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("ring-2", "ring-amber-400");
+      setTimeout(() => el.classList.remove("ring-2", "ring-amber-400"), 1500);
+    }
   };
 
   const handleOpenStoryContext = (statusId) => {
@@ -180,10 +174,7 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
   const renderReadReceiptTicks = (msg) => {
     if (isSelfChat || isSavedCloud) {
       return (
-        <span
-          className="flex items-center text-[#53bdeb] drop-shadow-[0_1px_1px_rgba(0,0,0,0.6)] font-bold ml-1 text-xs"
-          title="Saved & Synced (Cloud)"
-        >
+        <span className="flex items-center text-[#53bdeb] font-bold ml-1 text-xs" title="Saved & Synced">
           <FiCheck className="-mr-1.5 stroke-[2.5]" size={13} />
           <FiCheck className="stroke-[2.5]" size={13} />
         </span>
@@ -191,16 +182,16 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
     }
 
     const readList = msg.readBy || [];
-    const isReadByOther = isGroup
-      ? readList.length > 1
-      : readList.some((id) => (id?._id || id)?.toString() !== currentUserId);
+    
+    // Safely extract user ID whether readBy contains Objects or simple IDs
+    const isReadByOther = readList.some((item) => {
+      const readUserId = (item?.user?._id || item?.user || item)?.toString();
+      return readUserId && readUserId !== currentUserId;
+    });
 
     if (isReadByOther) {
       return (
-        <span
-          className="flex items-center text-[#53bdeb] drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] font-extrabold ml-1 text-xs"
-          title="Read (Seen)"
-        >
+        <span className="flex items-center text-[#53bdeb] font-extrabold ml-1 text-xs" title="Read">
           <FiCheck className="-mr-1.5 stroke-[2.8]" size={13} />
           <FiCheck className="stroke-[2.8]" size={13} />
         </span>
@@ -213,12 +204,15 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
     const otherUserId = (otherParticipant?._id || otherParticipant)?.toString();
     const isReceiverOnline = onlineUserIds.includes(otherUserId);
 
-    if (isReceiverOnline || (msg.deliveredTo && msg.deliveredTo.length > 0)) {
+    const deliveredList = msg.deliveredTo || [];
+    const isDeliveredToOther = deliveredList.some((d) => {
+      const dUserId = (d?._id || d)?.toString();
+      return dUserId && dUserId !== currentUserId;
+    });
+
+    if (isReceiverOnline || isDeliveredToOther || (msg.deliveredTo && msg.deliveredTo.length > 0)) {
       return (
-        <span
-          className="flex items-center text-slate-300 drop-shadow-[0_1px_1px_rgba(0,0,0,0.5)] opacity-95 ml-1 text-xs font-semibold"
-          title="Delivered (Net ON)"
-        >
+        <span className="flex items-center text-slate-300 opacity-95 ml-1 text-xs font-semibold" title="Delivered">
           <FiCheck className="-mr-1.5 stroke-[2.2]" size={13} />
           <FiCheck className="stroke-[2.2]" size={13} />
         </span>
@@ -226,10 +220,7 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
     }
 
     return (
-      <span
-        className="flex items-center text-slate-300 drop-shadow-[0_1px_1px_rgba(0,0,0,0.5)] opacity-90 ml-1 text-xs font-semibold"
-        title="Sent (Net OFF)"
-      >
+      <span className="flex items-center text-slate-300 opacity-90 ml-1 text-xs font-semibold" title="Sent">
         <FiCheck className="stroke-[2.2]" size={13} />
       </span>
     );
@@ -270,6 +261,28 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
     }
   };
 
+  const handleReactionClick = (msg, emoji) => {
+    if (reactToMessage) {
+      reactToMessage(msg._id, emoji);
+    }
+    if (!msg.reactions) msg.reactions = [];
+    const existingIndex = msg.reactions.findIndex(
+      (r) => (r.user?._id || r.user)?.toString() === currentUserId && r.emoji === emoji
+    );
+
+    if (existingIndex > -1) {
+      msg.reactions.splice(existingIndex, 1);
+    } else {
+      msg.reactions = msg.reactions.filter(
+        (r) => (r.user?._id || r.user)?.toString() !== currentUserId
+      );
+      msg.reactions.push({ user: currentUserId, emoji });
+    }
+
+    setActiveMenuMsgId(null);
+    setActiveReactionMsgId(null);
+  };
+
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center p-8">
@@ -285,16 +298,71 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
           🔒
         </div>
         <p className="text-sm font-semibold theme-text">Messages are End-to-End Encrypted</p>
-        <p className="text-xs theme-text-muted mt-0.5">
-          No one outside of this chat, not even KafChat, can read or listen to them.
-        </p>
       </div>
     );
   }
 
+  const activeMenuMessage = messages.find((m) => m._id === activeMenuMsgId);
+  const isMenuMessageMe = activeMenuMessage && (activeMenuMessage.sender?._id || activeMenuMessage.sender)?.toString() === currentUserId;
+
+  const activePinnedMsg = pinnedMessages.length > 0 ? pinnedMessages[currentPinnedIndex % pinnedMessages.length] : null;
+
   return (
-    <div className="flex flex-col gap-2 p-2 relative" ref={menuContainerRef}>
-      {/* Encryption Banner Top */}
+    <div className="flex flex-col gap-2 p-2 relative z-0" ref={menuContainerRef}>
+      {/* 📌 TELEGRAM STYLE PINNED MESSAGE BANNER */}
+      {activePinnedMsg && (
+        <div
+          onClick={() => scrollToMessage(activePinnedMsg._id)}
+          className="sticky top-0 z-10 mx-auto w-full max-w-md theme-panel-bg/90 backdrop-blur-md border theme-border rounded-2xl px-3 py-1.5 shadow-md flex items-center justify-between gap-2 cursor-pointer hover:theme-soft-bg transition animate-fadeIn mb-2"
+        >
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <div className="w-7 h-7 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
+              <FiBookmark size={14} />
+            </div>
+            <div className="flex flex-col min-w-0 flex-1">
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] font-bold text-amber-400">Pinned Message</span>
+                {pinnedMessages.length > 1 && (
+                  <span className="text-[9px] theme-text-muted font-mono">
+                    ({currentPinnedIndex + 1}/{pinnedMessages.length})
+                  </span>
+                )}
+              </div>
+              <p className="text-xs theme-text truncate">
+                {activePinnedMsg.text || (activePinnedMsg.mediaType === "poll" ? "📊 Poll" : `📎 ${activePinnedMsg.mediaType || "Media"}`)}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1 shrink-0">
+            {pinnedMessages.length > 1 && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setCurrentPinnedIndex((prev) => (prev + 1) % pinnedMessages.length);
+                }}
+                className="p-1 rounded-lg theme-soft-bg theme-text-muted hover:theme-text text-[10px] font-bold px-1.5 cursor-pointer"
+                title="Next Pinned"
+              >
+                Next
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                togglePinMessage(activePinnedMsg._id);
+              }}
+              className="p-1 theme-text-muted hover:text-red-400 rounded-lg cursor-pointer"
+              title="Unpin"
+            >
+              <FiX size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="flex justify-center my-1">
         <span className="px-3 py-0.5 rounded-full bg-slate-800/60 border border-slate-700/60 text-[10px] text-slate-400 flex items-center gap-1.5 shadow-sm">
           <FiLock size={10} className="text-amber-400" /> End-to-End Encrypted
@@ -304,11 +372,9 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
       {messages.map((msg) => {
         const isMe = (msg.sender?._id || msg.sender)?.toString() === currentUserId;
         const isHovered = hoveredMsgId === msg._id;
-        const isMenuOpen = activeMenuMsgId === msg._id;
         const isReactionOpen = activeReactionMsgId === msg._id;
-        const currentSwipeOffset = swipeOffsets[msg._id] || 0;
+        const isCurrentSliding = slidingMsgId === msg._id;
 
-        // System Notification
         if (msg.text && msg.text.startsWith("⏱️")) {
           return (
             <div key={msg._id} className="flex justify-center my-1.5">
@@ -320,35 +386,22 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
           );
         }
 
-        // Anti-Delete Handling for Pro / VIP Users vs Normal Users
         if (msg.deletedForEveryone) {
           if (currentUserIsVIP || msg.isAntiDeleteRecovered) {
             return (
               <div
                 key={msg._id}
+                id={`msg-${msg._id}`}
                 onMouseEnter={() => setHoveredMsgId(msg._id)}
                 onMouseLeave={() => setHoveredMsgId(null)}
                 className={`flex flex-col my-1 relative group ${isMe ? "items-end" : "items-start"}`}
               >
                 <div className="max-w-[75%] px-3 py-2 rounded-2xl bg-gradient-to-r from-red-500/10 via-pink-500/10 to-amber-500/10 border border-pink-500/30 text-xs text-white flex flex-col gap-1 shadow-md relative">
                   <span className="text-[9px] font-bold text-pink-400 flex items-center gap-1">
-                    <FiTrash2 size={10} /> 👑 VIP Recovered (Deleted by @{msg.sender?.username || "user"}):
+                    <FiTrash2 size={10} /> 👑 VIP Recovered:
                   </span>
                   <p className="line-through text-slate-300 opacity-90">{msg.text || "Original message content"}</p>
                 </div>
-
-                {isHovered && (
-                  <div className={`absolute top-1 ${isMe ? "-left-10" : "-right-10"} flex items-center z-20`}>
-                    <button
-                      type="button"
-                      onClick={() => setDeleteModalMsg(msg)}
-                      className="p-1.5 rounded-full theme-soft-bg text-red-400 hover:bg-red-500/20 border theme-border shadow transition"
-                      title="Delete options"
-                    >
-                      <FiTrash2 size={12} />
-                    </button>
-                  </div>
-                )}
               </div>
             );
           }
@@ -356,6 +409,7 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
           return (
             <div
               key={msg._id}
+              id={`msg-${msg._id}`}
               onMouseEnter={() => setHoveredMsgId(msg._id)}
               onMouseLeave={() => setHoveredMsgId(null)}
               className={`flex flex-col my-1 relative group ${isMe ? "items-end" : "items-start"}`}
@@ -364,19 +418,6 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
                 <FiTrash2 size={12} />
                 <span>This message was deleted</span>
               </div>
-
-              {isHovered && (
-                <div className={`absolute top-1 ${isMe ? "-left-10" : "-right-10"} flex items-center z-20`}>
-                  <button
-                    type="button"
-                    onClick={() => setDeleteModalMsg(msg)}
-                    className="p-1.5 rounded-full theme-soft-bg text-red-400 hover:bg-red-500/20 border theme-border shadow transition"
-                    title="Delete for me"
-                  >
-                    <FiTrash2 size={12} />
-                  </button>
-                </div>
-              )}
             </div>
           );
         }
@@ -384,17 +425,17 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
         return (
           <div
             key={msg._id}
+            id={`msg-${msg._id}`}
             onMouseEnter={() => setHoveredMsgId(msg._id)}
             onMouseLeave={() => setHoveredMsgId(null)}
             onTouchStart={(e) => handleTouchStart(msg._id, e)}
-            onTouchMove={(e) => handleTouchMove(msg._id, e)}
-            onTouchEnd={(e) => handleTouchEnd(msg, e)}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={() => handleTouchEnd(msg)}
             style={{
-              touchAction: "pan-y",
-              transform: `translateX(${currentSwipeOffset}px)`,
-              transition: currentSwipeOffset === 0 ? "transform 0.2s ease" : "none",
+              transform: isCurrentSliding ? `translateX(${slideOffset}px)` : "translateX(0px)",
+              transition: isCurrentSliding ? "none" : "transform 0.2s ease-out",
             }}
-            className={`flex flex-col group relative ${isMe ? "items-end" : "items-start"}`}
+            className={`flex flex-col group relative select-none ${isMe ? "items-end" : "items-start"}`}
           >
             {activeChat?.isGroupChat && !isMe && msg.sender?.fullName && (
               <span className="text-[10px] font-semibold theme-accent-text ml-10 mb-0.5">
@@ -402,11 +443,7 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
               </span>
             )}
 
-            <div
-              className={`flex items-end gap-1.5 max-w-[85%] sm:max-w-[70%] ${
-                isMe ? "flex-row-reverse" : "flex-row"
-              }`}
-            >
+            <div className={`flex items-end gap-1.5 max-w-[85%] sm:max-w-[70%] ${isMe ? "flex-row-reverse" : "flex-row"}`}>
               {!isMe && (
                 <Avatar
                   src={msg.sender?.avatar}
@@ -426,11 +463,10 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
                 {msg.isPinned && (
                   <div className="flex items-center gap-1 text-[9px] font-bold text-amber-400 mb-0.5">
                     <FiStar size={10} />
-                    <span>Pinned</span>
+                    <span>Pinned Message</span>
                   </div>
                 )}
 
-                {/* ULTRA-COMPACT INSTAGRAM MENTION CARD */}
                 {msg.storyContext && (
                   <div className="mb-1 w-44 rounded-xl overflow-hidden border border-white/15 bg-black/60 shadow-sm flex flex-col select-none">
                     <div
@@ -481,7 +517,7 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
                           e.stopPropagation();
                           handleTriggerReshare(msg.storyContext);
                         }}
-                        className="w-full py-1 bg-gradient-to-r from-pink-500 to-purple-600 hover:opacity-90 active:scale-95 text-white font-bold text-[9px] flex items-center justify-center gap-1 transition border-t border-white/10"
+                        className="w-full py-1 bg-gradient-to-r from-pink-500 to-purple-600 hover:opacity-90 active:scale-95 text-white font-bold text-[9px] flex items-center justify-center gap-1 transition border-t border-white/10 cursor-pointer"
                       >
                         <FiShare2 size={9} />
                         <span>Add to your story</span>
@@ -508,19 +544,19 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
                 )}
 
                 {msg.mediaUrl && msg.mediaType === "image" && !msg.storyContext && (
-                  <div className="rounded-xl overflow-hidden my-1 max-h-60 bg-black/10">
+                  <div className="rounded-xl overflow-hidden my-1 max-w-[240px] sm:max-w-[280px] max-h-60 bg-black/10 flex items-center justify-center">
                     <img
                       src={msg.mediaUrl}
                       alt="Shared Media"
-                      className="rounded-xl w-full h-auto object-cover cursor-pointer hover:opacity-95 transition"
+                      className="rounded-xl w-auto h-auto max-w-full max-h-80 object-contain cursor-pointer hover:opacity-95 transition"
                       onClick={() => window.open(msg.mediaUrl, "_blank")}
                     />
                   </div>
                 )}
 
                 {msg.mediaUrl && msg.mediaType === "video" && !msg.storyContext && (
-                  <div className="rounded-xl overflow-hidden my-1 max-h-60 bg-black">
-                    <video src={msg.mediaUrl} controls className="w-full max-h-56 rounded-xl object-contain" />
+                  <div className="rounded-xl overflow-hidden my-1 max-w-[240px] sm:max-w-[280px] max-h-70 bg-black flex items-center justify-center">
+                    <video src={msg.mediaUrl} controls className="w-full max-h-80 rounded-xl object-contain" />
                   </div>
                 )}
 
@@ -569,73 +605,95 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
                   </div>
                 )}
 
+                {/* POLL RENDERING WITH VIEW VOTES TRIGGER */}
                 {msg.mediaType === "poll" && msg.pollData && (
-                  <div className="flex flex-col gap-1.5 min-w-[200px] p-2 rounded-xl bg-black/10 border border-white/10 my-1">
-                    <span className="font-bold text-xs tracking-wide block">
-                      {msg.pollData.question}
-                    </span>
-                    <div className="flex flex-col gap-1 mt-0.5">
-                      {msg.pollData.options?.map((opt, idx) => {
-                        const totalVotes = msg.pollData.options.reduce(
-                          (acc, o) => acc + (o.votes?.length || 0),
-                          0
-                        );
-                        const votesCount = opt.votes?.length || 0;
-                        const percentage = totalVotes > 0 ? Math.round((votesCount / totalVotes) * 100) : 0;
-                        const hasVoted = opt.votes?.some((v) => (v?._id || v)?.toString() === currentUserId);
+  <div className="flex flex-col gap-1.5 min-w-[210px] p-2 rounded-xl bg-black/10 border border-white/10 my-1">
+    <div className="flex items-center justify-between">
+      <span className="font-bold text-xs tracking-wide block theme-text">
+        {msg.pollData.question}
+      </span>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setPollModalMsg(msg);
+        }}
+        className="p-1.5 rounded-xl theme-soft-bg hover:opacity-80 text-[10px] font-semibold flex items-center gap-1 cursor-pointer theme-text border theme-border shadow-xs"
+        title="View Poll Results"
+      >
+        <FiBarChart2 size={12} className="theme-accent-text" /> 
+        <span>View Votes</span>
+      </button>
+    </div>
 
-                        return (
-                          <button
-                            key={idx}
-                            type="button"
-                            onClick={() => votePoll && votePoll(msg._id, idx)}
-                            className={`relative p-2 rounded-lg text-left text-xs font-medium flex items-center justify-between border transition overflow-hidden ${
-                              hasVoted
-                                ? "bg-sky-500/25 border-sky-400 font-semibold"
-                                : "bg-black/15 border-white/15 hover:bg-black/25"
-                            }`}
-                          >
-                            <div
-                              className="absolute inset-y-0 left-0 bg-sky-500/30 transition-all duration-300"
-                              style={{ width: `${percentage}%` }}
-                            />
-                            <div className="relative flex items-center justify-between z-10 w-full">
-                              <span className="flex items-center gap-1">
-                                {hasVoted && <FiCheckCircle className="text-sky-400" size={12} />}
-                                {opt.text}
-                              </span>
-                              <span className="text-[9px] font-bold opacity-85 font-mono ml-2">
-                                {votesCount} ({percentage}%)
-                              </span>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
+    <div className="flex flex-col gap-1 mt-0.5">
+      {msg.pollData.options?.map((opt, idx) => {
+        const totalVotes = msg.pollData.options.reduce(
+          (acc, o) => acc + (o.votes?.length || 0),
+          0
+        );
+        const votesCount = opt.votes?.length || 0;
+        const percentage = totalVotes > 0 ? Math.round((votesCount / totalVotes) * 100) : 0;
+        
+        // Check if current user has voted on ANY option in this poll
+        const hasVotedThisOption = opt.votes?.some((v) => (v?._id || v)?.toString() === currentUserId);
+        const hasVotedAnyOption = msg.pollData.options.some((o) =>
+          o.votes?.some((v) => (v?._id || v)?.toString() === currentUserId)
+        );
+
+        return (
+          <button
+            key={idx}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              // Agar user pehle hi vote kar chuka hai, toh dubara click karke change hone se roko
+              if (hasVotedAnyOption) {
+                toast.error("You have already voted in this poll!");
+                return;
+              }
+              if (votePoll) votePoll(msg._id, idx);
+            }}
+            className={`relative p-2 rounded-lg text-left text-xs font-medium flex items-center justify-between border transition overflow-hidden cursor-pointer ${
+              hasVotedThisOption
+                ? "bg-sky-500/25 border-sky-400 font-semibold theme-text"
+                : "bg-black/15 border-white/15 hover:bg-black/25 theme-text"
+            }`}
+          >
+            <div
+              className="absolute inset-y-0 left-0 bg-sky-500/30 transition-all duration-300 pointer-events-none"
+              style={{ width: `${percentage}%` }}
+            />
+            <div className="relative flex items-center justify-between z-10 w-full">
+              <span className="flex items-center gap-1 truncate">
+                {hasVotedThisOption && <FiCheckCircle className="text-sky-400 shrink-0" size={12} />}
+                {opt.text}
+              </span>
+              <span className="text-[9px] font-bold opacity-85 font-mono ml-2 shrink-0">
+                {votesCount} ({percentage}%)
+              </span>
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  </div>
+)}
 
                 {msg.text && !msg.storyContext && (
                   <p className="whitespace-pre-wrap break-all [overflow-wrap:anywhere] leading-relaxed">{msg.text}</p>
                 )}
 
-                <div
-                  className={`flex items-center justify-end gap-1 mt-0.5 text-[9px] ${
-                    isMe ? "text-white/90" : "theme-text-muted"
-                  }`}
-                >
+                <div className={`flex items-center justify-end gap-1 mt-0.5 text-[9px] ${isMe ? "text-white/90" : "theme-text-muted"}`}>
                   {msg.isEdited && <span className="italic text-[8px] opacity-80">(edited)</span>}
                   <span>
-                    {new Date(msg.createdAt).toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
+                    {new Date(msg.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                   </span>
                   {isMe && renderReadReceiptTicks(msg)}
                 </div>
 
                 {msg.reactions && msg.reactions.length > 0 && (
-                  <div className="absolute -bottom-2.5 right-2 px-1.5 py-0.5 rounded-full theme-panel-bg border theme-border shadow-sm flex items-center gap-0.5 text-[9px]">
+                  <div className={`absolute -bottom-2.5 px-1.5 py-0.5 rounded-full theme-panel-bg border theme-border shadow-sm flex items-center gap-0.5 text-[9px] ${isMe ? "left-2" : "right-2"}`}>
                     {msg.reactions.map((r, i) => (
                       <span key={i}>{r.emoji}</span>
                     ))}
@@ -643,12 +701,13 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
                 )}
               </div>
 
-              {(isHovered || isMenuOpen || isReactionOpen) && (
-                <div className="flex items-center gap-0.5 theme-panel-bg border theme-border rounded-xl p-0.5 shadow-md animate-fadeIn z-25">
+              {/* ACTION BUTTONS (Hover) */}
+              {isHovered && !isReactionOpen && (
+                <div className="flex items-center gap-0.5 theme-panel-bg border theme-border rounded-xl p-0.5 shadow-xl z-10 relative">
                   <button
                     type="button"
                     onClick={() => setReplyingMessage(msg)}
-                    className="p-1 rounded-lg theme-text-muted hover:theme-accent-text hover:theme-soft-bg transition"
+                    className="p-1 rounded-lg theme-text-muted hover:theme-accent-text transition cursor-pointer"
                     title="Reply"
                   >
                     <FiCornerUpLeft size={12} />
@@ -660,7 +719,7 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
                       setActiveReactionMsgId((prev) => (prev === msg._id ? null : msg._id));
                       setActiveMenuMsgId(null);
                     }}
-                    className="p-1 rounded-lg theme-text-muted hover:theme-accent-text hover:theme-soft-bg transition"
+                    className="p-1 rounded-lg theme-text-muted hover:theme-accent-text transition cursor-pointer"
                     title="React"
                   >
                     <FiSmile size={12} />
@@ -669,104 +728,232 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
                   <button
                     type="button"
                     onClick={() => {
-                      setActiveMenuMsgId((prev) => (prev === msg._id ? null : msg._id));
+                      setActiveMenuMsgId(msg._id);
                       setActiveReactionMsgId(null);
                     }}
-                    className="p-1 rounded-lg theme-text-muted hover:theme-accent-text hover:theme-soft-bg transition"
+                    className="p-1 rounded-lg theme-text-muted hover:theme-accent-text transition cursor-pointer"
                     title="More Options"
                   >
                     <FiMoreVertical size={12} />
                   </button>
-
-                  {isReactionOpen && (
-                    <div className="absolute -top-9 left-0 flex items-center gap-1 p-1 rounded-full theme-panel-bg border theme-border shadow-2xl animate-bubbleIn z-30">
-                      {DEFAULT_REACTIONS.map((emoji) => (
-                        <button
-                          key={emoji}
-                          type="button"
-                          onClick={() => {
-                            reactToMessage(msg._id, emoji);
-                            setActiveReactionMsgId(null);
-                          }}
-                          className="hover:scale-125 transition-transform text-xs"
-                        >
-                          {emoji}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  {isMenuOpen && (
-                    <div
-                      className={`absolute top-7 ${
-                        isMe ? "right-0" : "left-0"
-                      } w-40 theme-panel-bg border theme-border rounded-2xl p-1 shadow-2xl z-30 flex flex-col gap-0.5 animate-bubbleIn`}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setReplyingMessage(msg);
-                          setActiveMenuMsgId(null);
-                        }}
-                        className="w-full px-2 py-1.5 rounded-xl hover:theme-soft-bg text-left text-xs font-medium theme-text flex items-center gap-1.5 transition"
-                      >
-                        <FiCornerUpLeft size={12} className="theme-accent-text" /> Reply
-                      </button>
-
-                      {isMe && msg.text && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditModalMsg(msg);
-                            setEditText(msg.text);
-                            setActiveMenuMsgId(null);
-                          }}
-                          className="w-full px-2 py-1.5 rounded-xl hover:theme-soft-bg text-left text-xs font-medium theme-text flex items-center gap-1.5 transition text-sky-400"
-                        >
-                          <FiEdit2 size={12} /> Edit Message
-                        </button>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (togglePinMessage) togglePinMessage(msg._id);
-                          setActiveMenuMsgId(null);
-                        }}
-                        className="w-full px-2 py-1.5 rounded-xl hover:theme-soft-bg text-left text-xs font-medium theme-text flex items-center gap-1.5 transition"
-                      >
-                        <FiStar size={12} className="text-amber-500" />{" "}
-                        {msg.isPinned ? "Unpin Message" : "Pin Message"}
-                      </button>
-
-                      {msg.text && (
-                        <button
-                          type="button"
-                          onClick={() => handleCopy(msg.text)}
-                          className="w-full px-2 py-1.5 rounded-xl hover:theme-soft-bg text-left text-xs font-medium theme-text flex items-center gap-1.5 transition"
-                        >
-                          <FiCopy size={12} /> Copy Text
-                        </button>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setDeleteModalMsg(msg);
-                          setActiveMenuMsgId(null);
-                        }}
-                        className="w-full px-2 py-1.5 rounded-xl hover:bg-red-500/10 text-left text-xs font-medium text-red-500 flex items-center gap-1.5 transition border-t theme-border mt-0.5 pt-1"
-                      >
-                        <FiTrash2 size={12} /> Delete Message
-                      </button>
-                    </div>
-                  )}
                 </div>
               )}
             </div>
           </div>
         );
       })}
+
+      {/* 📊 POLL RESULTS / VOTERS DETAILS MODAL */}
+      {pollModalMsg && (
+        <div
+          className="fixed inset-0 z-[9999999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fadeIn"
+          onClick={() => setPollModalMsg(null)}
+        >
+          <div
+            className="w-full max-w-sm theme-panel-bg border theme-border rounded-3xl p-5 shadow-2xl flex flex-col gap-4 bg-slate-900 text-white"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-2 border-b border-slate-700">
+              <h4 className="text-sm font-bold flex items-center gap-2">
+                <FiBarChart2 className="text-sky-400" /> Poll Results
+              </h4>
+              <button
+                type="button"
+                onClick={() => setPollModalMsg(null)}
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
+                <FiX size={18} />
+              </button>
+            </div>
+
+            <div className="font-semibold text-xs text-slate-200">
+              {pollModalMsg.pollData?.question}
+            </div>
+
+            <div className="flex flex-col gap-3 max-h-64 overflow-y-auto pr-1">
+              {pollModalMsg.pollData?.options?.map((opt, idx) => {
+                const totalVotes = pollModalMsg.pollData.options.reduce(
+                  (acc, o) => acc + (o.votes?.length || 0),
+                  0
+                );
+                const votesCount = opt.votes?.length || 0;
+                const percentage = totalVotes > 0 ? Math.round((votesCount / totalVotes) * 100) : 0;
+
+                return (
+                  <div key={idx} className="flex flex-col gap-1 p-2.5 rounded-xl bg-slate-800/80 border border-slate-700">
+                    <div className="flex items-center justify-between text-xs font-bold">
+                      <span>{opt.text}</span>
+                      <span className="text-sky-400 font-mono">{votesCount} votes ({percentage}%)</span>
+                    </div>
+                    <div className="w-full bg-slate-700 h-1.5 rounded-full overflow-hidden">
+                      <div className="bg-sky-400 h-full transition-all duration-300" style={{ width: `${percentage}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="text-[10px] text-slate-400 text-center font-mono">
+              Total Votes: {pollModalMsg.pollData.options.reduce((acc, o) => acc + (o.votes?.length || 0), 0)}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🎯 MESSAGE OPTIONS MENU */}
+      {activeMenuMessage && (
+        <div
+          className="fixed inset-0 z-[999999] bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn"
+          onClick={() => setActiveMenuMsgId(null)}
+        >
+          <div
+            className="w-64 theme-panel-bg border theme-border rounded-3xl p-3 shadow-2xl z-[1000000] flex flex-col gap-1.5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-2 py-1 border-b theme-border flex items-center justify-between">
+              <span className="text-[11px] font-bold theme-text-muted">Message Options</span>
+              <button
+                type="button"
+                onClick={() => setActiveMenuMsgId(null)}
+                className="theme-text-muted hover:theme-text p-0.5 rounded-full cursor-pointer"
+              >
+                <FiX size={15} />
+              </button>
+            </div>
+
+            {/* 🌟 REACTIONS AT THE VERY TOP */}
+            <div className="flex items-center justify-around p-2 theme-soft-bg rounded-2xl border theme-border shadow-inner">
+              {DEFAULT_REACTIONS.slice(0, 5).map((emoji) => {
+                const existingMyReaction = activeMenuMessage.reactions?.find(
+                  (r) => (r.user?._id || r.user)?.toString() === currentUserId && r.emoji === emoji
+                );
+                return (
+                  <button
+                    key={emoji}
+                    type="button"
+                    onClick={() => handleReactionClick(activeMenuMessage, emoji)}
+                    className={`hover:scale-125 transition-transform text-lg cursor-pointer p-1 rounded-full ${
+                      existingMyReaction ? "bg-amber-500/20 ring-1 ring-amber-400" : ""
+                    }`}
+                  >
+                    {emoji}
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                onClick={() => {
+                  const targetMsgId = activeMenuMessage._id;
+                  setActiveMenuMsgId(null);
+                  setShowFullEmojiPickerMsgId(targetMsgId);
+                }}
+                className="w-7 h-7 rounded-full theme-panel-bg border theme-border text-xs flex items-center justify-center theme-text cursor-pointer hover:theme-accent-tint shadow-sm"
+                title="More emojis"
+              >
+                <FiPlus size={14} />
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setReplyingMessage(activeMenuMessage);
+                setActiveMenuMsgId(null);
+              }}
+              className="w-full px-3 py-2 rounded-xl hover:theme-soft-bg text-left text-xs font-medium theme-text flex items-center gap-2.5 transition cursor-pointer"
+            >
+              <FiCornerUpLeft size={14} className="theme-accent-text" /> Reply
+            </button>
+
+            {isMenuMessageMe && activeMenuMessage.text && (
+              <button
+                type="button"
+                onClick={() => {
+                  setEditModalMsg(activeMenuMessage);
+                  setEditText(activeMenuMessage.text);
+                  setActiveMenuMsgId(null);
+                }}
+                className="w-full px-3 py-2 rounded-xl hover:theme-soft-bg text-left text-xs font-medium theme-text flex items-center gap-2.5 transition text-sky-400 cursor-pointer"
+              >
+                <FiEdit2 size={14} /> Edit Message
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => {
+                if (togglePinMessage) togglePinMessage(activeMenuMessage._id);
+                toast.success(activeMenuMessage.isPinned ? "Message unpinned" : "Message pinned 📌");
+                setActiveMenuMsgId(null);
+              }}
+              className="w-full px-3 py-2 rounded-xl hover:theme-soft-bg text-left text-xs font-medium theme-text flex items-center gap-2.5 transition cursor-pointer"
+            >
+              <FiStar size={14} className="text-amber-500" />
+              {activeMenuMessage.isPinned ? "Unpin Message" : "Pin Message"}
+            </button>
+
+            {isMenuMessageMe && (
+              <button
+                type="button"
+                onClick={() => {
+                  setInfoModalMsg(activeMenuMessage);
+                  setActiveMenuMsgId(null);
+                }}
+                className="w-full px-3 py-2 rounded-xl hover:theme-soft-bg text-left text-xs font-medium theme-text flex items-center gap-2.5 transition cursor-pointer"
+              >
+                <FiInfo size={14} className="text-sky-400" /> Message Info
+              </button>
+            )}
+
+            {activeMenuMessage.text && (
+              <button
+                type="button"
+                onClick={() => {
+                  handleCopy(activeMenuMessage.text);
+                }}
+                className="w-full px-3 py-2 rounded-xl hover:theme-soft-bg text-left text-xs font-medium theme-text flex items-center gap-2.5 transition cursor-pointer"
+              >
+                <FiCopy size={14} /> Copy Text
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => {
+                setDeleteModalMsg(activeMenuMessage);
+                setActiveMenuMsgId(null);
+              }}
+              className="w-full px-3 py-2 rounded-xl hover:bg-red-500/10 text-left text-xs font-medium text-red-500 flex items-center gap-2.5 transition border-t theme-border mt-1 pt-2 cursor-pointer"
+            >
+              <FiTrash2 size={14} /> Delete Message
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 🌟 FULL EMOJI PICKER MODAL */}
+      {showFullEmojiPickerMsgId && (
+        <div
+          className="fixed inset-0 z-[9999999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fadeIn"
+          onClick={() => setShowFullEmojiPickerMsgId(null)}
+        >
+          <div
+            className="shadow-2xl rounded-3xl overflow-hidden border theme-border bg-black relative z-[10000000]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <EmojiPicker
+              theme={Theme.AUTO}
+              onEmojiClick={(emojiData) => {
+                handleReactionClick(messages.find(m => m._id === showFullEmojiPickerMsgId), emojiData.emoji);
+                setShowFullEmojiPickerMsgId(null);
+              }}
+              searchPlaceHolder="Search reaction emoji..."
+              width={320}
+              height={380}
+            />
+          </div>
+        </div>
+      )}
 
       {typingUsers && typingUsers.length > 0 && (
         <div className="flex items-center gap-1.5 text-xs theme-accent-text font-medium animate-pulse ml-2 py-0.5">
@@ -775,14 +962,77 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
         </div>
       )}
 
+      {/* WHATSAPP STYLE MESSAGE INFO MODAL */}
+{infoModalMsg && (
+  <div
+    className="fixed inset-0 z-[999999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fadeIn"
+    onClick={() => setInfoModalMsg(null)}
+  >
+    <div
+      className="w-full max-w-sm theme-panel-bg border theme-border rounded-3xl p-5 shadow-2xl flex flex-col gap-4"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-center justify-between pb-2 border-b theme-border">
+        <h4 className="text-sm font-bold theme-text flex items-center gap-2">
+          <FiInfo className="text-sky-400" /> Message Info
+        </h4>
+        <button
+          type="button"
+          onClick={() => setInfoModalMsg(null)}
+          className="theme-text-muted hover:theme-text cursor-pointer"
+        >
+          <FiX size={18} />
+        </button>
+      </div>
+
+      <div className="p-3 rounded-2xl theme-soft-bg border theme-border text-xs theme-text break-all">
+        {infoModalMsg.text}
+      </div>
+
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center justify-between text-xs">
+          <span className="flex items-center gap-2 text-sky-400 font-semibold">
+            <FiCheck className="stroke-[2.8]" size={15} /> Read / Seen By
+          </span>
+          <span className="theme-text-muted font-mono">
+            {(() => {
+              const readList = infoModalMsg.readBy || [];
+              // Find the entry for the other participant
+              const otherReadEntry = readList.find(
+                (r) => (r?.user?._id || r?.user)?.toString() !== currentUserId
+              );
+              
+              const exactReadTime = otherReadEntry?.readAt;
+
+              if (exactReadTime) {
+                return new Date(exactReadTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+              }
+              return readList.length > (isSelfChat ? 0 : 1) ? "Seen" : "Not seen yet";
+            })()}
+          </span>
+        </div>
+
+        <div className="flex items-center justify-between text-xs">
+          <span className="flex items-center gap-2 text-slate-300 font-semibold">
+            <FiCheck className="stroke-[2.2]" size={15} /> Delivered To
+          </span>
+          <span className="theme-text-muted font-mono">
+            {new Date(infoModalMsg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+)}
+
       {/* EDIT MESSAGE MODAL */}
       {editModalMsg && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fadeIn"
+          className="fixed inset-0 z-[999999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fadeIn"
           onClick={() => setEditModalMsg(null)}
         >
           <div
-            className="w-full max-w-sm theme-panel-bg border theme-border rounded-3xl p-4 shadow-2xl animate-bubbleIn flex flex-col gap-2.5"
+            className="w-full max-w-sm theme-panel-bg border theme-border rounded-3xl p-4 shadow-2xl flex flex-col gap-2.5"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between pb-1.5 border-b theme-border">
@@ -792,7 +1042,7 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
               <button
                 type="button"
                 onClick={() => setEditModalMsg(null)}
-                className="text-gray-400 hover:text-white"
+                className="text-gray-400 hover:text-white cursor-pointer"
               >
                 <FiX size={15} />
               </button>
@@ -811,13 +1061,13 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
                 <button
                   type="button"
                   onClick={() => setEditModalMsg(null)}
-                  className="px-3.5 py-1.5 rounded-xl text-xs font-semibold theme-soft-bg theme-text hover:opacity-90 transition"
+                  className="px-3.5 py-1.5 rounded-xl text-xs font-semibold theme-soft-bg theme-text cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-3.5 py-1.5 rounded-xl text-xs font-semibold theme-accent-bg shadow transition"
+                  className="px-3.5 py-1.5 rounded-xl text-xs font-semibold theme-accent-bg shadow cursor-pointer"
                 >
                   Save Edit
                 </button>
@@ -830,11 +1080,11 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
       {/* DELETE CONFIRMATION MODAL */}
       {deleteModalMsg && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fadeIn"
+          className="fixed inset-0 z-[999999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fadeIn"
           onClick={() => setDeleteModalMsg(null)}
         >
           <div
-            className="w-full max-w-xs theme-panel-bg border theme-border rounded-3xl p-4 shadow-2xl animate-bubbleIn flex flex-col gap-2.5"
+            className="w-full max-w-sm theme-panel-bg border theme-border rounded-3xl p-4 shadow-2xl flex flex-col gap-2.5"
             onClick={(e) => e.stopPropagation()}
           >
             <h4 className="text-sm font-bold theme-text flex items-center gap-1.5">
@@ -852,7 +1102,7 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
                   <button
                     type="button"
                     onClick={() => handleDeleteConfirm(true)}
-                    className="w-full py-2 rounded-xl bg-red-500 text-white text-xs font-semibold shadow hover:bg-red-600 transition"
+                    className="w-full py-2 rounded-xl bg-red-500 text-white text-xs font-semibold shadow hover:bg-red-600 transition cursor-pointer"
                   >
                     Delete for Everyone
                   </button>
@@ -861,7 +1111,7 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
               <button
                 type="button"
                 onClick={() => handleDeleteConfirm(false)}
-                className="w-full py-2 rounded-xl theme-soft-bg text-xs font-semibold theme-text hover:bg-red-500/15 hover:text-red-500 transition"
+                className="w-full py-2 rounded-xl theme-soft-bg text-xs font-semibold theme-text hover:bg-red-500/15 hover:text-red-500 transition cursor-pointer"
               >
                 Delete for Me
               </button>
@@ -869,7 +1119,7 @@ const MessageList = ({ messages = [], loading, activeChat, typingUsers }) => {
               <button
                 type="button"
                 onClick={() => setDeleteModalMsg(null)}
-                className="w-full py-1.5 rounded-xl text-xs font-medium theme-text-muted hover:theme-text transition"
+                className="w-full py-1.5 rounded-xl text-xs font-medium theme-text-muted hover:theme-text transition cursor-pointer"
               >
                 Cancel
               </button>

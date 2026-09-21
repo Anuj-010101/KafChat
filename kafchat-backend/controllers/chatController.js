@@ -130,7 +130,7 @@ exports.fetchChats = async (req, res) => {
             unreadCount = await Message.countDocuments({
               chatId: c._id,
               sender: { $ne: userId },
-              readBy: { $ne: userId },
+              "readBy.user": { $ne: userId }, // ✅ Fixed for object array schema
               deletedBy: { $ne: userId },
             });
           }

@@ -97,8 +97,13 @@ const messageSchema = new mongoose.Schema(
     },
     reactions: [reactionSchema],
     deliveredTo: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
-    readBy: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
-
+    // Message.js me readBy schema ko aise update karein:
+readBy: [
+  {
+    user: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    readAt: { type: Date, default: Date.now },
+  },
+],
     // 🚫 Anti-Delete Engine (PRO retains original, Free sees 'deleted')
     deletedForEveryone: { type: Boolean, default: false },
     deletedAt: { type: Date, default: null },

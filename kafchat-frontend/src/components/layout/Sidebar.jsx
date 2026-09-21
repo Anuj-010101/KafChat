@@ -360,8 +360,7 @@ const Sidebar = ({ mobileVisible }) => {
 
   const totalUnread = useMemo(() => {
     return (chats || [])
-      .filter((c) => c && !c.isSelfChat && !c.isLocked && !c.isArchived)
-      .reduce((acc, c) => acc + (Number(c?.unreadCount) || 0), 0);
+      .filter((c) => c && !c.isSelfChat && !c.isLocked && !c.isArchived && (Number(c?.unreadCount) || 0) > 0).length;
   }, [chats]);
 
   const handleOpenTopActivity = () => {

@@ -87,7 +87,7 @@ export const ChatProvider = ({ children }) => {
     setActiveWallpaper("");
   }, [triggerSnapCleanup]);
 
-  // Open Chat with E2EE Auto-Decryption
+  // Open Chat with E2EE Auto-Decryption & Mark Read Trigger
   const openChat = useCallback(
     async (chat) => {
       const previous = activeChatRef.current;
@@ -137,18 +137,18 @@ export const ChatProvider = ({ children }) => {
         );
 
         setMessages(decryptedList);
+
+        // Explicitly trigger markRead when chat is opened so server updates readBy & blue ticks work
+        if (messageService.markRead) {
+          await messageService.markRead(chat._id);
+        } else if (messageService.markAsRead) {
+          await messageService.markAsRead(chat._id);
+        }
       } catch (err) {
         console.error("Get messages error:", err);
         toast.error("Couldn't load messages");
       } finally {
         setLoadingMessages(false);
-      }
-
-      try {
-        if (messageService.markRead) await messageService.markRead(chat._id);
-        else if (messageService.markAsRead) await messageService.markAsRead(chat._id);
-      } catch (readErr) {
-        console.warn("Silent mark read note:", readErr);
       }
     },
     [triggerSnapCleanup, currentUserId]
@@ -283,23 +283,46 @@ export const ChatProvider = ({ children }) => {
   const reactToMessage = useCallback(
     async (messageId, emoji) => {
       try {
+        const targetMessage = messages.find((m) => m._id === messageId);
+        const existingMyReaction = targetMessage?.reactions?.find(
+          (r) => (r.user?._id || r.user)?.toString() === currentUserId && r.emoji === emoji
+        );
+
+        // Optimistic UI update for instant toggle
+        let updatedReactions = [...(targetMessage?.reactions || [])];
+        if (existingMyReaction) {
+          updatedReactions = updatedReactions.filter(
+            (r) => !((r.user?._id || r.user)?.toString() === currentUserId && r.emoji === emoji)
+          );
+        } else {
+          updatedReactions = updatedReactions.filter(
+            (r) => (r.user?._id || r.user)?.toString() !== currentUserId
+          );
+          updatedReactions.push({ user: currentUserId, emoji });
+        }
+
+        setMessages((prev) =>
+          prev.map((m) => (m._id === messageId ? { ...m, reactions: updatedReactions } : m))
+        );
+
         const { data } = await api.post(`/messages/${messageId}/react`, { emoji });
-        if (data.success) {
+        if (data && data.success) {
+          const finalReactions = data.reactions || updatedReactions;
           setMessages((prev) =>
-            prev.map((m) => (m._id === messageId ? { ...m, reactions: data.reactions } : m))
+            prev.map((m) => (m._id === messageId ? { ...m, reactions: finalReactions } : m))
           );
           const socket = getSocket();
           socket?.emit("message_reaction", {
             chatId: activeChat?._id,
             messageId,
-            reactions: data.reactions,
+            reactions: finalReactions,
           });
         }
-      } catch {
-        toast.error("Failed to add reaction");
+      } catch (err) {
+        toast.error(err.response?.data?.message || "Failed to update reaction");
       }
     },
-    [activeChat?._id]
+    [activeChat?._id, messages, currentUserId]
   );
 
   const votePoll = useCallback(
@@ -376,7 +399,6 @@ export const ChatProvider = ({ children }) => {
         if (data.success) {
           toast.success(data.message || (data.isLocked ? "Chat locked 🔒" : "Chat unlocked 🔓"));
 
-          // If lock succeeds, update user's lockPin state locally too
           setUser((prev) => ({ ...prev, lockPin: pin }));
 
           setActiveChat((prev) =>
@@ -483,8 +505,7 @@ export const ChatProvider = ({ children }) => {
 
         const updated = [...prev];
         const targetChat = updated[idx];
-        const currentCount = Number(targetChat.unreadCount) || 0;
-        const newUnread = isCurrentChat ? 0 : currentCount + 1;
+        const newUnread = isCurrentChat ? 0 : (targetChat.unreadCount || 0) + 1;
 
         updated[idx] = {
           ...targetChat,
@@ -503,8 +524,8 @@ export const ChatProvider = ({ children }) => {
             return {
               ...m,
               deletedForEveryone: true,
-              recoveredText: originalText || m.text,
-              text: isVip ? m.text : "This message was deleted",
+              isAntiDeleteRecovered: isVip,
+              text: isVip ? (originalText || m.text) : "This message was deleted",
             };
           }
           return m;
@@ -563,7 +584,6 @@ export const ChatProvider = ({ children }) => {
     };
 
     socket.on("online_users", onOnlineUsers);
-    socket.on("receive_message", onReceiveE2EEMessage);
     socket.on("receive_e2ee_message", onReceiveE2EEMessage);
     socket.on("message_deleted", onMessageDeleted);
     socket.on("new_group_created", onNewGroupCreated);
@@ -577,7 +597,6 @@ export const ChatProvider = ({ children }) => {
 
     return () => {
       socket.off("online_users", onOnlineUsers);
-      socket.off("receive_message", onReceiveE2EEMessage);
       socket.off("receive_e2ee_message", onReceiveE2EEMessage);
       socket.off("message_deleted", onMessageDeleted);
       socket.off("new_group_created", onNewGroupCreated);
@@ -658,21 +677,27 @@ export const ChatProvider = ({ children }) => {
   const deleteMessage = useCallback(async (messageId, forEveryone = false) => {
     try {
       await messageService.deleteMessage(messageId, forEveryone);
-      if (forEveryone) {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m._id === messageId
+      setMessages((prev) =>
+        prev.map((m) => {
+          if (m._id === messageId) {
+            if (forEveryone && isVip) {
+              return {
+                ...m,
+                deletedForEveryone: true,
+                isAntiDeleteRecovered: true,
+              };
+            }
+            return forEveryone
               ? { ...m, deletedForEveryone: true, text: "This message was deleted" }
-              : m
-          )
-        );
-      } else {
-        setMessages((prev) => prev.filter((m) => m._id !== messageId));
-      }
+              : null;
+          }
+          return m;
+        }).filter(Boolean)
+      );
     } catch {
       toast.error("Failed to delete");
     }
-  }, []);
+  }, [isVip]);
 
   const emitTyping = useCallback(
     (isGhost = false) => {
