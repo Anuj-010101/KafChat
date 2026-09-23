@@ -22,8 +22,11 @@ const {
   logoutSession,
   logoutAllOtherSessions,
   sendForgotPasswordOtp,
+  verifyResetOtp,     // 👈 Added import
   resetPasswordWithOtp,
   activateVipPlan,
+  setGoogleUsername,
+  updateUsername,
 } = require("../controllers/authController");
 const { protect } = require("../middleware/authMiddleware");
 
@@ -37,7 +40,9 @@ router.post("/complete-registration", register);
 router.post("/login", loginWithPassword);
 router.post("/login-with-password", loginWithPassword);
 router.post("/forgot-password-otp", sendForgotPasswordOtp);
+router.post("/verify-reset-otp", verifyResetOtp);     // 👈 Added route
 router.post("/reset-password-otp", resetPasswordWithOtp);
+router.post("/set-google-username", setGoogleUsername);
 
 // Protected Auth Endpoints
 router.get("/me", protect, getMe);
@@ -49,6 +54,7 @@ router.patch("/profile", protect, updateProfile);
 router.patch("/change-password", protect, changePassword);
 router.patch("/chat-lock-pin", protect, setChatLockPin);
 router.post("/reset-chat-lock-pin", protect, resetChatLockPin);
+router.patch("/update-username", protect, updateUsername);
 
 // VIP Activation Route
 router.post("/vip/activate", protect, activateVipPlan);

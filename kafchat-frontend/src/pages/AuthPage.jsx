@@ -12,6 +12,7 @@ import {
   FiCheckCircle,
   FiAlertCircle,
   FiLoader,
+  FiPlusCircle,
 } from "react-icons/fi";
 import { useAuth } from "../hooks/useAuth";
 import { useTheme } from "../context/ThemeContext";
@@ -78,6 +79,10 @@ const AuthPage = () => {
   const [resetOtp, setResetOtp] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  
+  // Multi-account forgot password states
+  const [forgotAccounts, setForgotAccounts] = useState([]);
+  const [selectedForgotUserId, setSelectedForgotUserId] = useState(null);
 
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -187,14 +192,20 @@ const AuthPage = () => {
 
     setLoading(true);
     try {
-      await register({
+      const res = await api.post("/auth/set-google-username", {
         fullName: googleNewFullName.trim() || "KafChat User",
         username: googleNewUsername.trim().toLowerCase(),
         email: googleEmailVerified,
         password: googleNewPassword,
         avatar: googleAvatarUrl,
       });
-      toast.success("Account created successfully! 🎉");
+
+      if (res.data.token) {
+        localStorage.setItem("kafchat_token", res.data.token);
+        toast.success("Account created successfully! 🎉");
+        window.location.reload(); 
+      }
+
       setIsGoogleNewUserFlow(false);
     } catch (err) {
       toast.error(err.response?.data?.message || "Registration failed");
@@ -215,7 +226,7 @@ const AuthPage = () => {
       });
       toast.success(res.data.message || "OTP sent to your email!");
       setIsEmailOtpSent(true);
-      setSecondsLeft(120); // Reset timer to 120s (2 mins)
+      setSecondsLeft(120); 
     } catch (err) {
       toast.error(err.response?.data?.message || "Failed to send email OTP");
     } finally {
@@ -301,9 +312,17 @@ const AuthPage = () => {
       const res = await api.post("/auth/forgot-password-otp", {
         identifier: forgotIdentifier.trim(),
       });
-      toast.success(res.data.message || "OTP sent to your email!");
-      setTargetEmail(res.data.targetEmail);
-      setForgotStep(2);
+
+      if (res.data.hasMultipleAccounts) {
+        setForgotAccounts(res.data.accounts);
+        setForgotStep(1.5); 
+        toast.success(res.data.message);
+      } else {
+        toast.success(res.data.message || "OTP sent to your email!");
+        setTargetEmail(res.data.targetEmail);
+        setSelectedForgotUserId(res.data.targetUserId);
+        setForgotStep(2);
+      }
     } catch (err) {
       toast.error(err.response?.data?.message || "Account not found or no email linked.");
     } finally {
@@ -311,11 +330,34 @@ const AuthPage = () => {
     }
   };
 
-  // Forgot Password Step 2
+  // Forgot Password Step 2: Verify OTP
+  const handleVerifyResetOtp = async (e) => {
+    e.preventDefault();
+    if (!resetOtp.trim() || resetOtp.length !== 6) {
+      return toast.error("Please enter a valid 6-digit OTP");
+    }
+
+    setLoading(true);
+    try {
+      const res = await api.post("/auth/verify-reset-otp", {
+        email: targetEmail,
+        userId: selectedForgotUserId,
+        otp: resetOtp.trim(),
+      });
+      toast.success(res.data.message);
+      setForgotStep(3); // 👈 Move to New Password Section
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Invalid or expired OTP");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Forgot Password Step 3: Final Password Reset
   const handleResetPassword = async (e) => {
     e.preventDefault();
-    if (!resetOtp.trim() || !newPassword.trim()) {
-      return toast.error("OTP and New Password are required");
+    if (!newPassword.trim() || newPassword.length < 6) {
+      return toast.error("Password must be at least 6 characters");
     }
     if (newPassword !== confirmNewPassword) {
       return toast.error("Passwords do not match");
@@ -325,14 +367,20 @@ const AuthPage = () => {
     try {
       const res = await api.post("/auth/reset-password-otp", {
         email: targetEmail,
+        userId: selectedForgotUserId,
         otp: resetOtp.trim(),
         newPassword,
       });
       toast.success(res.data.message || "Password changed! Please login.");
       setMode("signin");
       setForgotStep(1);
+      setForgotAccounts([]);
+      setSelectedForgotUserId(null);
+      setResetOtp("");
+      setNewPassword("");
+      setConfirmNewPassword("");
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to reset password. Check OTP.");
+      toast.error(err.response?.data?.message || "Failed to reset password.");
     } finally {
       setLoading(false);
     }
@@ -402,7 +450,7 @@ const AuthPage = () => {
           <div className="flex items-center justify-between mb-5">
             <button
               type="button"
-              onClick={() => { setMode("signin"); setForgotStep(1); }}
+              onClick={() => { setMode("signin"); setForgotStep(1); setForgotAccounts([]); }}
               className={`flex items-center gap-1.5 text-xs font-bold ${isDarkMode ? "text-cyan-400 hover:underline" : "text-sky-600 hover:underline"}`}
             >
               <FiArrowLeft size={14} /> Back to Sign In
@@ -439,7 +487,7 @@ const AuthPage = () => {
                   </label>
                   <button
                     type="button"
-                    onClick={() => setMode("forgot")}
+                    onClick={() => { setMode("forgot"); setForgotStep(1); setForgotAccounts([]); }}
                     className={`text-[11px] font-bold ${isDarkMode ? "text-cyan-400 hover:underline" : "text-sky-600 hover:underline"}`}
                   >
                     Forgot Password?
@@ -559,7 +607,6 @@ const AuthPage = () => {
                       {loading ? "Verifying..." : "Verify OTP & Continue"}
                     </button>
 
-                    {/* Timer and Resend Option (Formatted as MM:SS) */}
                     <div className="text-center text-xs text-slate-400 mt-1">
                       {secondsLeft > 0 ? (
                         <span>
@@ -727,53 +774,6 @@ const AuthPage = () => {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  <div className="flex flex-col gap-1">
-                    <label className={`text-xs font-medium ${isDarkMode ? "text-slate-300" : "text-slate-700"}`}>Gender</label>
-                    <select
-                      value={gender}
-                      onChange={(e) => setGender(e.target.value)}
-                      className={`w-full px-3 py-2 rounded-2xl border text-xs outline-none cursor-pointer font-semibold ${isDarkMode ? "bg-[#1a1e29] border-slate-800 text-white" : "bg-slate-50 border-slate-300 text-slate-950"}`}
-                    >
-                      <option value="">Select Gender</option>
-                      <option value="Male">Male</option>
-                      <option value="Female">Female</option>
-                      <option value="Other">Other</option>
-                      <option value="Prefer not to say">Prefer not to say</option>
-                    </select>
-                  </div>
-
-                  <div className="flex flex-col gap-1">
-                    <label className={`text-xs font-medium ${isDarkMode ? "text-slate-300" : "text-slate-700"}`}>Date of Birth</label>
-                    <div className="grid grid-cols-3 gap-1">
-                      <select
-                        value={birthDay}
-                        onChange={(e) => setBirthDay(e.target.value)}
-                        className={`px-1 py-2 rounded-xl border text-xs outline-none font-semibold ${isDarkMode ? "bg-[#1a1e29] border-slate-800 text-white" : "bg-slate-50 border-slate-300 text-slate-950"}`}
-                      >
-                        <option value="">Day</option>
-                        {DAYS.map((d) => (<option key={d} value={d}>{d}</option>))}
-                      </select>
-                      <select
-                        value={birthMonth}
-                        onChange={(e) => setBirthMonth(e.target.value)}
-                        className={`px-1 py-2 rounded-xl border text-xs outline-none font-semibold ${isDarkMode ? "bg-[#1a1e29] border-slate-800 text-white" : "bg-slate-50 border-slate-300 text-slate-950"}`}
-                      >
-                        <option value="">Month</option>
-                        {MONTHS.map((m, idx) => (<option key={m} value={idx + 1}>{m.slice(0, 3)}</option>))}
-                      </select>
-                      <select
-                        value={birthYear}
-                        onChange={(e) => setBirthYear(e.target.value)}
-                        className={`px-1 py-2 rounded-xl border text-xs outline-none font-semibold ${isDarkMode ? "bg-[#1a1e29] border-slate-800 text-white" : "bg-slate-50 border-slate-300 text-slate-950"}`}
-                      >
-                        <option value="">Year</option>
-                        {YEARS.map((y) => (<option key={y} value={y}>{y}</option>))}
-                      </select>
-                    </div>
-                  </div>
-                </div>
-
                 <div className="flex gap-2 mt-2">
                   <button
                     type="button"
@@ -824,8 +824,50 @@ const AuthPage = () => {
                   {loading ? "Sending..." : "Send Recovery OTP to Email"}
                 </button>
               </form>
-            ) : (
-              <form onSubmit={handleResetPassword} className="flex flex-col gap-3.5">
+            ) : forgotStep === 1.5 ? (
+              <div className="flex flex-col gap-3">
+                <div className="p-3 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 text-xs text-cyan-400">
+                  Multiple accounts found with this email. Please select the account you want to recover:
+                </div>
+                <div className="flex flex-col gap-2 max-h-48 overflow-y-auto">
+                  {forgotAccounts.map((acc) => (
+                    <button
+                      key={acc._id}
+                      type="button"
+                      onClick={async () => {
+                        setSelectedForgotUserId(acc._id);
+                        setLoading(true);
+                        try {
+                          const res = await api.post("/auth/forgot-password-otp", {
+                            identifier: acc.username,
+                          });
+                          setTargetEmail(res.data.targetEmail);
+                          setForgotStep(2);
+                          toast.success("OTP sent to your email!");
+                        } catch (err) {
+                          toast.error("Failed to send OTP");
+                        } finally {
+                          setLoading(false);
+                        }
+                      }}
+                      className="flex items-center justify-between p-3 rounded-2xl border bg-[#1a1e29] border-slate-800 hover:border-cyan-400 text-left transition"
+                    >
+                      <span className="text-xs font-bold text-white">{acc.fullName}</span>
+                      <span className="text-xs font-mono text-cyan-400">@{acc.username}</span>
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setForgotStep(1)}
+                  className="w-full py-2 text-xs font-bold text-slate-400 hover:text-white"
+                >
+                  Back
+                </button>
+              </div>
+            ) : forgotStep === 2 ? (
+              /* 🚨 STEP 2: SIRF OTP VERIFY KARNE KA SECTION */
+              <form onSubmit={handleVerifyResetOtp} className="flex flex-col gap-4">
                 <div className="p-3 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 text-xs text-cyan-400">
                   OTP has been sent to your registered Email. Enter the 6-digit code below:
                 </div>
@@ -842,8 +884,24 @@ const AuthPage = () => {
                       placeholder="Enter 6-digit OTP"
                       className={`w-full bg-transparent text-xs font-bold tracking-widest outline-none ${isDarkMode ? "text-white" : "text-slate-950"}`}
                       required
+                      autoFocus
                     />
                   </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full py-3 rounded-2xl bg-cyan-400 text-slate-950 font-black text-xs shadow-lg hover:opacity-95 transition flex items-center justify-center gap-2"
+                >
+                  {loading ? "Verifying..." : "Verify OTP & Continue"}
+                </button>
+              </form>
+            ) : (
+              /* 🚨 STEP 3: OTP SAHI HONE KE BAAD NEW PASSWORD SECTION */
+              <form onSubmit={handleResetPassword} className="flex flex-col gap-3.5">
+                <div className="p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-400">
+                  ✔ OTP verified successfully! Now set your new password.
                 </div>
 
                 <div className="flex flex-col gap-1">
@@ -857,6 +915,7 @@ const AuthPage = () => {
                       placeholder="Min 6 characters"
                       className={`w-full bg-transparent text-xs outline-none font-medium ${isDarkMode ? "text-white" : "text-slate-950"}`}
                       required
+                      autoFocus
                     />
                   </div>
                 </div>
@@ -885,6 +944,134 @@ const AuthPage = () => {
                 </button>
               </form>
             )}
+          </div>
+        )}
+
+        {/* 🚀 GOOGLE MULTI-ACCOUNT SELECTOR MODAL */}
+        {googleModalData && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fadeIn">
+            <div className={`w-full max-w-md rounded-3xl p-6 border shadow-2xl ${isDarkMode ? "bg-[#12151c] border-slate-800 text-white" : "bg-white border-slate-200 text-slate-900"}`}>
+              <h3 className="text-lg font-black mb-1">Select an Account</h3>
+              <p className="text-xs text-slate-400 mb-4">
+                Multiple accounts found for <span className="text-cyan-400 font-mono">{googleModalData.email}</span>
+              </p>
+
+              <div className="flex flex-col gap-2.5 max-h-60 overflow-y-auto mb-4">
+                {googleModalData.accounts.map((acc) => (
+                  <button
+                    key={acc._id}
+                    type="button"
+                    onClick={() => handleSelectGoogleAccount(acc._id, googleModalData.credentialToken)}
+                    className={`flex items-center gap-3 p-3 rounded-2xl border transition-all text-left ${
+                      isDarkMode ? "bg-[#1a1e29] border-slate-800 hover:border-cyan-400" : "bg-slate-50 border-slate-200 hover:border-sky-500"
+                    }`}
+                  >
+                    <img
+                      src={acc.avatar || googleModalData.defaultAvatar || "https://api.dicebear.com/7.x/bottts/svg?seed=fallback"}
+                      alt=""
+                      className="w-10 h-10 rounded-full object-cover border border-cyan-400/30"
+                    />
+                    <div>
+                      <h4 className="text-xs font-bold">{acc.fullName}</h4>
+                      <p className="text-[10px] text-slate-400 font-mono">@{acc.username}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const email = googleModalData.email;
+                    const name = googleModalData.defaultName;
+                    const avatar = googleModalData.defaultAvatar;
+                    setGoogleModalData(null);
+                    setGoogleEmailVerified(email);
+                    setGoogleNewFullName(name || "");
+                    setGoogleAvatarUrl(avatar || "");
+                    const base = email.split("@")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
+                    setGoogleNewUsername(`${base}_${Math.floor(100 + Math.random() * 900)}`);
+                    setIsGoogleNewUserFlow(true);
+                  }}
+                  className="flex items-center justify-center gap-2 w-full py-2.5 rounded-2xl bg-cyan-400/10 border border-cyan-400/30 text-cyan-400 font-bold text-xs hover:bg-cyan-400/20 transition"
+                >
+                  <FiPlusCircle size={15} /> Create a New Account with this Email
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGoogleModalData(null)}
+                  className="w-full py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-white"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 🚀 GOOGLE NEW ACCOUNT SETUP FLOW MODAL */}
+        {isGoogleNewUserFlow && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fadeIn">
+            <div className={`w-full max-w-md rounded-3xl p-6 border shadow-2xl ${isDarkMode ? "bg-[#12151c] border-slate-800 text-white" : "bg-white border-slate-200 text-slate-900"}`}>
+              <h3 className="text-lg font-black mb-1">Complete Google Registration</h3>
+              <p className="text-xs text-slate-400 mb-4">
+                Set a username and password for <span className="text-cyan-400 font-mono">{googleEmailVerified}</span>
+              </p>
+
+              <form onSubmit={handleGoogleNewAccountSubmit} className="flex flex-col gap-3">
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-bold text-slate-400">Full Name</label>
+                  <input
+                    type="text"
+                    value={googleNewFullName}
+                    onChange={(e) => googleNewFullName(e.target.value)}
+                    className={`px-3 py-2 rounded-xl border text-xs outline-none ${isDarkMode ? "bg-[#1a1e29] border-slate-800 text-white" : "bg-slate-50 border-slate-300 text-slate-950"}`}
+                    required
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-bold text-slate-400">Username</label>
+                  <input
+                    type="text"
+                    value={googleNewUsername}
+                    onChange={(e) => setGoogleNewUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_.]/g, ""))}
+                    className={`px-3 py-2 rounded-xl border text-xs outline-none font-bold ${isDarkMode ? "bg-[#1a1e29] border-slate-800 text-white" : "bg-slate-50 border-slate-300 text-slate-950"}`}
+                    required
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-bold text-slate-400">Password (Min 6 chars)</label>
+                  <input
+                    type="password"
+                    value={googleNewPassword}
+                    onChange={(e) => setGoogleNewPassword(e.target.value)}
+                    placeholder="Create password"
+                    className={`px-3 py-2 rounded-xl border text-xs outline-none ${isDarkMode ? "bg-[#1a1e29] border-slate-800 text-white" : "bg-slate-50 border-slate-300 text-slate-950"}`}
+                    required
+                  />
+                </div>
+
+                <div className="flex gap-2 mt-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsGoogleNewUserFlow(false)}
+                    className="w-1/3 py-2.5 rounded-xl border border-slate-700 text-xs font-bold text-slate-400 hover:text-white"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="w-2/3 py-2.5 rounded-xl bg-cyan-400 text-slate-950 font-black text-xs hover:opacity-95 transition"
+                  >
+                    {loading ? "Creating..." : "Create Account & Login"}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         )}
 

@@ -86,7 +86,7 @@ exports.accessPersonalVault = async (req, res) => {
   }
 };
 
-// @desc Fetch All User Chats
+// @desc Fetch All User Chats (Excludes Vault/Archived Chats from normal view)
 // @route GET /api/chats
 exports.fetchChats = async (req, res) => {
   try {
@@ -94,6 +94,12 @@ exports.fetchChats = async (req, res) => {
     const isVIP = req.user.isVIP;
 
     await Chat.deleteMany({ participants: userId, isSelfChat: true });
+
+    const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+    await Chat.deleteMany({
+      requestStatus: "pending",
+      createdAt: { $lt: ninetyDaysAgo },
+    });
 
     const hasCloud = await Chat.exists({ participants: userId, isSavedCloud: true });
     if (!hasCloud) {
@@ -106,9 +112,11 @@ exports.fetchChats = async (req, res) => {
       });
     }
 
+    // Yahan archived chats ko normal list se filter out kiya gaya hai (jab tak vault code se search na ho)
     const chats = await Chat.find({
       participants: { $elemMatch: { $eq: userId } },
       isSelfChat: { $ne: true },
+      archivedBy: { $ne: userId }, // ✅ Normal list se archived chats hidden rahengi
     })
       .populate("participants", "fullName username avatar profilePhotos avatarBitmojiFallback isVIP isOnline lastSeen publicKey")
       .populate("requestedBy", "fullName username avatar profilePhotos bio")
@@ -130,7 +138,7 @@ exports.fetchChats = async (req, res) => {
             unreadCount = await Message.countDocuments({
               chatId: c._id,
               sender: { $ne: userId },
-              "readBy.user": { $ne: userId }, // ✅ Fixed for object array schema
+              "readBy.user": { $ne: userId },
               deletedBy: { $ne: userId },
             });
           }
@@ -459,7 +467,7 @@ exports.setDisappearingTimer = async (req, res) => {
       chatId: chat._id,
       text: `⏱️ ${req.user.fullName || req.user.username} ${timerLabel}`,
       mediaType: "none",
-      readBy: [req.user._id],
+      readBy: [{ user: req.user._id, readAt: new Date() }],
     });
 
     await Chat.findByIdAndUpdate(chat._id, {

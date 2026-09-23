@@ -34,6 +34,8 @@ import {
   FiGrid,
   FiBookmark,
   FiStar,
+  FiUserPlus,
+  FiUserMinus,
 } from "react-icons/fi";
 import Avatar from "../common/Avatar";
 import DualProfileBanner from "../common/DualProfileBanner";
@@ -94,6 +96,7 @@ const ChatInfoDrawer = ({ isOpen, onClose, messages, onStartCall }) => {
   const [isArchived, setIsArchived] = useState(Boolean(activeChat?.isArchived));
   const [isPinned, setIsPinned] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
+  const [isFollowing, setIsFollowing] = useState(false);
 
   const [showDisappearModal, setShowDisappearModal] = useState(false);
   const [showWallpaperModal, setShowWallpaperModal] = useState(false);
@@ -103,7 +106,7 @@ const ChatInfoDrawer = ({ isOpen, onClose, messages, onStartCall }) => {
   const [drawerFollowers, setDrawerFollowers] = useState([]);
   const [drawerFollowing, setDrawerFollowing] = useState([]);
   const [drawerUserPosts, setDrawerUserPosts] = useState([]);
-  const [drawerSocialModal, setDrawerSocialModal] = useState(null); // "followers" | "following"
+  const [drawerSocialModal, setDrawerSocialModal] = useState(null);
 
   // Instagram-Style Profile Inspector Popup State
   const [inspectedProfileUser, setInspectedProfileUser] = useState(null);
@@ -151,10 +154,18 @@ const ChatInfoDrawer = ({ isOpen, onClose, messages, onStartCall }) => {
           .then(({ data }) => {
             setDrawerFollowers(data.followers || []);
             setDrawerFollowing(data.following || []);
+            const freshFollowingCheck = (data.followers || []).some(
+              (f) => (f?._id || f)?.toString() === currentUserId
+            );
+            setIsFollowing(freshFollowingCheck);
           })
           .catch(() => {
             setDrawerFollowers(targetOtherUser.followers || []);
             setDrawerFollowing(targetOtherUser.following || []);
+            const fallbackCheck = (targetOtherUser.followers || []).some(
+              (f) => (f?._id || f)?.toString() === currentUserId
+            );
+            setIsFollowing(fallbackCheck);
           });
 
         api.get(`/users/${targetId}/profile`)
@@ -164,13 +175,7 @@ const ChatInfoDrawer = ({ isOpen, onClose, messages, onStartCall }) => {
             }
           })
           .catch(() => {
-            api.get(`/social/user/${targetId}/posts`)
-              .then(({ data }) => {
-                if (data.posts) {
-                  setDrawerUserPosts(data.posts);
-                }
-              })
-              .catch(() => setDrawerUserPosts([]));
+            setDrawerUserPosts([]);
           });
       }
     }
@@ -198,7 +203,6 @@ const ChatInfoDrawer = ({ isOpen, onClose, messages, onStartCall }) => {
     ? activeChat.groupName || activeChat.chatName
     : otherUser?.fullName;
 
-  // STRICT MEDIA FILTER: Excludes Bitmojis, Stickers, Giphy tags, and emoji/sticker indicators
   const mediaList =
     messages?.filter((m) => {
       if (!m.mediaUrl || m.mediaType !== "image") return false;
@@ -249,6 +253,25 @@ const ChatInfoDrawer = ({ isOpen, onClose, messages, onStartCall }) => {
     }
   };
 
+  const handleToggleFollow = async () => {
+    const targetId = otherUser?._id || otherUser;
+    if (!targetId) return;
+    try {
+      if (isFollowing) {
+        await api.patch(`/users/unfollow/${targetId}`);
+        setIsFollowing(false);
+        toast.success("Unfollowed successfully");
+      } else {
+        await api.post(`/users/follow/${targetId}`);
+        setIsFollowing(true);
+        toast.success("Following");
+      }
+      if (refreshChats) refreshChats();
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to update follow status");
+    }
+  };
+
   const handleAvatarChange = async (e) => {
     e.stopPropagation();
     const file = e.target.files && e.target.files[0];
@@ -265,14 +288,6 @@ const ChatInfoDrawer = ({ isOpen, onClose, messages, onStartCall }) => {
     if (!groupName.trim()) return;
     await updateGroupInfo(activeChat._id, { name: groupName.trim() });
     setIsEditingName(false);
-  };
-
-  const handleMuteToggleClick = () => {
-    if (isMuted) {
-      handleApplyMute("unmute");
-    } else {
-      setShowMuteModal(true);
-    }
   };
 
   const handleApplyMute = async (duration) => {
@@ -475,25 +490,26 @@ const ChatInfoDrawer = ({ isOpen, onClose, messages, onStartCall }) => {
   return (
     <>
       <div
-        className="fixed inset-y-0 right-0 w-full sm:w-96 theme-panel-bg border-l theme-border z-40 flex flex-col shadow-2xl animate-bubbleIn select-none"
+        className="fixed inset-y-0 right-0 w-full sm:w-96 theme-panel-bg border-l theme-border z-50 flex flex-col shadow-2xl animate-bubbleIn select-none"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div className="h-16 px-5 border-b theme-border flex items-center justify-between theme-soft-bg/50 shrink-0">
+        {/* Fixed Header with Non-overlapping Close Button */}
+        <div className="h-16 px-5 border-b theme-border flex items-center justify-between theme-soft-bg/50 shrink-0 relative z-20">
           <h3 className="text-sm font-semibold theme-text flex items-center gap-2">
             <FiInfo className="theme-accent-text" />
             {isGroup ? "Group Info" : "Contact Profile"}
           </h3>
           <button
+            type="button"
             onClick={onClose}
-            className="p-1.5 rounded-full theme-text-muted hover:theme-text theme-soft-bg transition"
+            className="p-2 rounded-full theme-text-muted hover:theme-text theme-soft-bg transition cursor-pointer"
+            title="Close Drawer"
           >
-            <FiX size={18} />
+            <FiX size={20} />
           </button>
         </div>
 
         <div className="flex-1 overflow-y-auto scrollbar-thin p-4 flex flex-col gap-4">
-          {/* 1. Instagram Layout: Avatar -> Bio -> 3-Column Stats Bar (Posts, Followers, Following) -> Posts Grid */}
           {!isGroup && otherUser ? (
             <div className="flex flex-col items-center">
               <DualProfileBanner
@@ -514,7 +530,42 @@ const ChatInfoDrawer = ({ isOpen, onClose, messages, onStartCall }) => {
                 </p>
               )}
 
-              {/* 3-Column Stats Bar: Posts, Followers, Following */}
+              {/* Instagram Style Action Buttons Bar (Following/Follow + Message) */}
+              <div className="flex items-center gap-2 w-full mt-3">
+                <button
+                  type="button"
+                  onClick={handleToggleFollow}
+                  className={`flex-1 py-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition shadow-sm ${
+                    isFollowing
+                      ? "theme-border theme-soft-bg theme-text hover:bg-red-500/10 hover:text-red-500"
+                      : "theme-accent-bg text-white border-transparent hover:opacity-90"
+                  }`}
+                >
+                  {isFollowing ? (
+                    <>
+                      <FiUserMinus size={13} /> Following
+                    </>
+                  ) : (
+                    <>
+                      <FiUserPlus size={13} /> Follow
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (startChatWithUser && otherUser._id) {
+                      startChatWithUser(otherUser._id);
+                      onClose();
+                    }
+                  }}
+                  className="flex-1 py-2 rounded-xl theme-soft-bg border theme-border text-xs font-semibold theme-text flex items-center justify-center gap-1.5 hover:opacity-80 transition shadow-sm"
+                >
+                  <FiMessageSquare size={13} /> Message
+                </button>
+              </div>
+
               <div className="grid grid-cols-3 gap-2 w-full mt-3 p-2.5 rounded-2xl theme-soft-bg border theme-border text-center">
                 <div className="flex flex-col items-center">
                   <span className="text-xs font-bold theme-text">{drawerUserPosts.length}</span>
@@ -538,7 +589,6 @@ const ChatInfoDrawer = ({ isOpen, onClose, messages, onStartCall }) => {
                 </button>
               </div>
 
-              {/* POSTS GRID SECTION PLACED BELOW STATS BAR */}
               {!otherUser.isPrivateAccount && drawerUserPosts.length > 0 && (
                 <div className="w-full mt-3 flex flex-col gap-2">
                   <span className="text-[10px] font-bold theme-text-muted uppercase tracking-wider text-left px-1 flex items-center gap-1">
@@ -665,7 +715,7 @@ const ChatInfoDrawer = ({ isOpen, onClose, messages, onStartCall }) => {
             </button>
           </div>
 
-          {/* 2. Media, Links & Docs Hub */}
+          {/* Media Hub */}
           <div className="p-3.5 rounded-2xl theme-soft-bg/50 border theme-border flex flex-col gap-2.5">
             <span className="text-[10px] font-bold theme-text-muted uppercase tracking-wider">
               Media, Links & Docs Hub
@@ -830,13 +880,12 @@ const ChatInfoDrawer = ({ isOpen, onClose, messages, onStartCall }) => {
             </div>
           </div>
 
-          {/* 3. Advanced Privacy & Controls */}
+          {/* Advanced Privacy & Controls */}
           <div className="p-3.5 rounded-2xl theme-soft-bg/50 border theme-border flex flex-col gap-3">
             <span className="text-[10px] font-bold theme-text-muted uppercase tracking-wider">
               Advanced Privacy & Controls
             </span>
 
-            {/* Pin Chat Toggle with FiBookmark (Clean Pin Symbol) */}
             <div
               onClick={handleTogglePin}
               className="flex items-center justify-between gap-3 py-1 border-b theme-border cursor-pointer hover:opacity-80 transition"
@@ -859,7 +908,6 @@ const ChatInfoDrawer = ({ isOpen, onClose, messages, onStartCall }) => {
               </span>
             </div>
 
-            {/* Add to Favorites (Star) Toggle */}
             <div
               onClick={handleToggleFavorite}
               className="flex items-center justify-between gap-3 py-1 border-b theme-border cursor-pointer hover:opacity-80 transition"
@@ -882,7 +930,6 @@ const ChatInfoDrawer = ({ isOpen, onClose, messages, onStartCall }) => {
               </span>
             </div>
 
-            {/* Chat Wallpaper */}
             <div
               onClick={() => setShowWallpaperModal(true)}
               className="flex items-center justify-between gap-3 py-1 border-b theme-border cursor-pointer hover:opacity-80 transition"
@@ -899,7 +946,6 @@ const ChatInfoDrawer = ({ isOpen, onClose, messages, onStartCall }) => {
               <span className="text-xs theme-text-muted">›</span>
             </div>
 
-            {/* Disappearing Messages */}
             <div
               onClick={() => setShowDisappearModal(true)}
               className="flex items-center justify-between gap-3 py-1 border-b theme-border cursor-pointer hover:opacity-80 transition"
@@ -922,7 +968,6 @@ const ChatInfoDrawer = ({ isOpen, onClose, messages, onStartCall }) => {
               <span className="text-xs theme-text-muted">›</span>
             </div>
 
-            {/* Archive This Chat Toggle */}
             <div
               onClick={handleArchiveClick}
               className="flex items-center justify-between gap-3 py-1 border-b theme-border cursor-pointer hover:opacity-80 transition"
@@ -945,7 +990,6 @@ const ChatInfoDrawer = ({ isOpen, onClose, messages, onStartCall }) => {
               </span>
             </div>
 
-            {/* Lock This Chat Option */}
             <div
               onClick={handleLockClick}
               className="flex items-center justify-between gap-3 py-1 border-b theme-border cursor-pointer hover:opacity-80 transition"
@@ -968,7 +1012,6 @@ const ChatInfoDrawer = ({ isOpen, onClose, messages, onStartCall }) => {
               </span>
             </div>
 
-            {/* Auto-Delete on View Toggle */}
             <div
               onClick={handleToggleAutoDeleteOnView}
               className="flex items-center justify-between gap-3 py-1 cursor-pointer hover:opacity-85 transition"
@@ -1002,7 +1045,7 @@ const ChatInfoDrawer = ({ isOpen, onClose, messages, onStartCall }) => {
             </div>
           </div>
 
-          {/* 5. Conversation Actions */}
+          {/* Conversation Actions */}
           <div className="flex flex-col gap-2 mt-1">
             <button
               type="button"
@@ -1103,7 +1146,7 @@ const ChatInfoDrawer = ({ isOpen, onClose, messages, onStartCall }) => {
         </div>
       )}
 
-      {/* Instagram-Style User Profile Inspector Popup Modal with Nested Recursive Support */}
+      {/* Instagram-Style User Profile Inspector Popup Modal */}
       {inspectedProfileUser && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-fadeIn"
@@ -1142,7 +1185,6 @@ const ChatInfoDrawer = ({ isOpen, onClose, messages, onStartCall }) => {
               <p className="text-xs theme-text-muted italic px-2">"{inspectedProfileUser.bio}"</p>
             )}
 
-            {/* Network Count Bar */}
             <div className="grid grid-cols-2 gap-4 w-full p-2.5 rounded-2xl theme-soft-bg border theme-border text-center">
               <div className="flex flex-col">
                 <span className="text-xs font-bold theme-text">{inspectedProfileUser.followers?.length || 0}</span>
@@ -1154,7 +1196,6 @@ const ChatInfoDrawer = ({ isOpen, onClose, messages, onStartCall }) => {
               </div>
             </div>
 
-            {/* Privacy Rule: If Account is Private, hide posts */}
             {inspectedProfileUser.isPrivateAccount ? (
               <div className="w-full py-8 px-4 rounded-2xl theme-soft-bg border theme-border flex flex-col items-center gap-2 text-center">
                 <FiLock size={24} className="text-amber-400 mb-1" />

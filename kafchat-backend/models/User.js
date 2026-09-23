@@ -56,6 +56,11 @@ const userSchema = new mongoose.Schema(
       trim: true,
       lowercase: true,
     },
+    // 👇 Naya field add karo (Bina kuch purana hataye)
+    isUsernameSet: {
+      type: Boolean,
+      default: true, // Purane/Normal users ke liye true rahega
+    },
     email: {
       type: String,
       required: [true, "Email is required"],

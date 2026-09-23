@@ -238,6 +238,31 @@ exports.toggleStoryHide = async (req, res) => {
   }
 };
 
+// @desc Unfollow User
+// @route PATCH /api/users/unfollow/:id
+exports.unfollowUser = async (req, res) => {
+  try {
+    const userIdToUnfollow = req.params.id;
+    const currentUserId = req.user._id;
+
+    if (currentUserId.toString() === userIdToUnfollow) {
+      return res.status(400).json({ success: false, message: "Aap khud ko unfollow nahi kar sakte" });
+    }
+
+    await User.findByIdAndUpdate(currentUserId, {
+      $pull: { following: userIdToUnfollow },
+    });
+
+    await User.findByIdAndUpdate(userIdToUnfollow, {
+      $pull: { followers: currentUserId },
+    });
+
+    return res.status(200).json({ success: true, message: "Successfully unfollowed" });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 // @desc Get full user profile
 // @route GET /api/users/:id
 exports.getUserById = async (req, res) => {
@@ -426,5 +451,30 @@ exports.deleteAccount = async (req, res) => {
     return res.status(200).json({ success: true, message: "Account deleted permanently" });
   } catch (error) {
     return res.status(500).json({ success: false, message: "Failed to delete account" });
+  }
+};
+
+// @desc Follow User
+// @route POST /api/users/follow/:id
+exports.followUser = async (req, res) => {
+  try {
+    const userIdToFollow = req.params.id;
+    const currentUserId = req.user._id;
+
+    if (currentUserId.toString() === userIdToFollow) {
+      return res.status(400).json({ success: false, message: "Aap khud ko follow nahi kar sakte" });
+    }
+
+    await User.findByIdAndUpdate(currentUserId, {
+      $addToSet: { following: userIdToFollow },
+    });
+
+    await User.findByIdAndUpdate(userIdToFollow, {
+      $addToSet: { followers: currentUserId },
+    });
+
+    return res.status(200).json({ success: true, message: "Successfully followed" });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
   }
 };

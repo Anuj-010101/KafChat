@@ -188,7 +188,7 @@ exports.sendEmailOtp = async (req, res) => {
         email: cleanEmail,
         username: `temp_${Date.now()}`,
         fullName: "Temp User",
-        password: "", // Empty password to indicate unverified/new
+        password: "",
         otp,
         otpExpires,
       });
@@ -461,13 +461,19 @@ exports.loginWithPassword = async (req, res) => {
     const user = await User.findOne({ $or: conditions }).select("+password");
 
     if (!user) {
+      console.log(`❌ Login Failed: User not found for input: ${input}`);
       return res.status(401).json({
         success: false,
         message: "Invalid credentials. User not found.",
       });
     }
 
-    const isMatch = await user.matchPassword(rawPassword.toString().trim());
+    console.log(`🔍 Found user for login: ${user.username}, Email: ${user.email}`);
+
+    // 🚨 Direct bcrypt.compare use karte hain taaki schema method ka confusion khatam ho jaye
+    const isMatch = await bcrypt.compare(rawPassword.toString().trim(), user.password);
+
+    console.log(`🔐 Password Match Result: ${isMatch}`);
 
     if (!isMatch) {
       return res.status(401).json({
@@ -802,7 +808,7 @@ exports.activateVipPlan = async (req, res) => {
   }
 };
 
-// @desc Change Password
+// @desc Change Password (Supports Google Users setting password for the first time)
 // @route PATCH /api/auth/change-password
 exports.changePassword = async (req, res) => {
   try {
@@ -816,7 +822,10 @@ exports.changePassword = async (req, res) => {
     const user = await User.findById(userId).select("+password");
     if (!user) return res.status(404).json({ success: false, message: "User not found" });
 
-    if (user.password && currentPassword) {
+    if (user.password && user.password.trim() !== "") {
+      if (!currentPassword) {
+        return res.status(400).json({ success: false, message: "Current password is required" });
+      }
       const isMatch = await bcrypt.compare(currentPassword, user.password);
       if (!isMatch) {
         return res.status(400).json({ success: false, message: "Current password is incorrect" });
@@ -827,7 +836,7 @@ exports.changePassword = async (req, res) => {
     const hashedPassword = await bcrypt.hash(newPassword, salt);
     await User.findByIdAndUpdate(userId, { password: hashedPassword });
 
-    return res.status(200).json({ success: true, message: "Password changed successfully! 🎉" });
+    return res.status(200).json({ success: true, message: "Password updated successfully! 🎉" });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
@@ -982,7 +991,7 @@ exports.logout = async (req, res) => {
   }
 };
 
-// @desc Send Forgot Password OTP (Non-blocking background delivery)
+// @desc Send Forgot Password OTP with Multi-Account Detection
 // @route POST /api/auth/forgot-password-otp
 exports.sendForgotPasswordOtp = async (req, res) => {
   try {
@@ -993,17 +1002,31 @@ exports.sendForgotPasswordOtp = async (req, res) => {
 
     const cleanInput = identifier.trim().toLowerCase();
 
-    const conditions = [{ email: cleanInput }, { username: cleanInput }];
-
-    const user = await User.findOne({ $or: conditions });
+    let user = await User.findOne({ username: cleanInput });
+    
     if (!user) {
-      return res.status(404).json({ success: false, message: "No account found with this detail" });
+      const accounts = await User.find({ email: cleanInput });
+      
+      if (!accounts || accounts.length === 0) {
+        return res.status(404).json({ success: false, message: "No account found with this detail" });
+      }
+
+      if (accounts.length > 1) {
+        return res.status(200).json({
+          success: true,
+          hasMultipleAccounts: true,
+          accounts: accounts.map(acc => ({ _id: acc._id, username: acc.username, fullName: acc.fullName })),
+          message: "Multiple accounts found with this email. Please select a username.",
+        });
+      }
+
+      user = accounts[0];
     }
 
     if (!user.email) {
       return res.status(400).json({
         success: false,
-        message: "No email linked to this account for OTP recovery. Contact support.",
+        message: "No email linked to this account for OTP recovery.",
       });
     }
 
@@ -1024,7 +1047,8 @@ exports.sendForgotPasswordOtp = async (req, res) => {
       success: true,
       email: user.email.replace(/(.{2})(.*)(?=@)/, "$1****"),
       targetEmail: user.email,
-      message: `Reset OTP sent successfully!`,
+      targetUserId: user._id,
+      message: `Reset OTP sent successfully to @${user.username}!`,
     });
   } catch (error) {
     console.error("Forgot Password OTP Error:", error);
@@ -1032,21 +1056,23 @@ exports.sendForgotPasswordOtp = async (req, res) => {
   }
 };
 
-// @desc Reset Password using OTP
-// @route POST /api/auth/reset-password-otp
-exports.resetPasswordWithOtp = async (req, res) => {
+// @desc Verify Reset Password OTP before changing password
+// @route POST /api/auth/verify-reset-otp
+exports.verifyResetOtp = async (req, res) => {
   try {
-    const { email, otp, newPassword } = req.body;
+    const { email, userId, otp } = req.body;
 
-    if (!email || !otp || !newPassword) {
-      return res.status(400).json({ success: false, message: "All fields are required" });
+    if (!otp) {
+      return res.status(400).json({ success: false, message: "OTP is required" });
     }
 
-    if (newPassword.length < 6) {
-      return res.status(400).json({ success: false, message: "Password must be at least 6 characters" });
+    let user;
+    if (userId) {
+      user = await User.findById(userId);
+    } else if (email) {
+      user = await User.findOne({ email: email.trim().toLowerCase() });
     }
 
-    const user = await User.findOne({ email: email.trim().toLowerCase() }).select("+password");
     if (!user || user.otp !== otp) {
       return res.status(400).json({ success: false, message: "Invalid or incorrect OTP" });
     }
@@ -1055,18 +1081,208 @@ exports.resetPasswordWithOtp = async (req, res) => {
       return res.status(400).json({ success: false, message: "OTP has expired. Please request again." });
     }
 
-    user.password = await bcrypt.hash(newPassword, 10);
+    return res.status(200).json({
+      success: true,
+      message: "OTP verified successfully! Please enter your new password.",
+    });
+  } catch (error) {
+    console.error("Verify Reset OTP Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to verify OTP" });
+  }
+};
+
+exports.resetPasswordWithOtp = async (req, res) => {
+  try {
+    const { email, userId, otp, newPassword } = req.body;
+
+    if (!otp || !newPassword) {
+      return res.status(400).json({ success: false, message: "OTP and new password are required" });
+    }
+
+    const cleanPassword = newPassword.toString().trim();
+    if (cleanPassword.length < 6) {
+      return res.status(400).json({ success: false, message: "Password must be at least 6 characters" });
+    }
+
+    let user;
+    if (userId) {
+      user = await User.findById(userId).select("+password");
+    } 
+    
+    if (!user && email) {
+      user = await User.findOne({ email: email.trim().toLowerCase() }).select("+password");
+    }
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User account not found for password reset" });
+    }
+
+    if (!user.otp || user.otp !== otp.toString().trim()) {
+      return res.status(400).json({ success: false, message: "Invalid or incorrect OTP" });
+    }
+
+    if (user.otpExpires && new Date() > user.otpExpires) {
+      return res.status(400).json({ success: false, message: "OTP has expired. Please request again." });
+    }
+
+    // 🔑 Yahan sirf plain password assign karein, pre-save hook khud hash kar lega
+    user.password = cleanPassword;
     user.otp = null;
     user.otpExpires = null;
     await user.save();
 
+    console.log(`✅ Password successfully reset for user: ${user.username}`);
+
     return res.status(200).json({
-      success: timeStamp => { },
       success: true,
       message: "Password reset successfully! Please login with your new password.",
     });
   } catch (error) {
     console.error("Reset Password Error:", error);
     return res.status(500).json({ success: false, message: "Failed to reset password" });
+  }
+};
+
+// @desc Set Username for Google / New Users on First Login
+// @route POST /api/auth/set-google-username
+exports.setGoogleUsername = async (req, res) => {
+  try {
+    const { email, username, fullName, avatar, avatarConfig, gender, dob, deviceId } = req.body;
+    
+    if (!email || !username) {
+      return res.status(400).json({ success: false, message: "Email and username are required" });
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanUsername = username.toLowerCase().replace(/[^a-z0-9_.]/g, "").trim();
+
+    if (cleanUsername.length < 3) {
+      return res.status(400).json({ success: false, message: "Username must be at least 3 characters" });
+    }
+
+    const usernameExists = await User.findOne({ username: cleanUsername });
+    if (usernameExists) {
+      return res.status(400).json({ success: false, message: "This username is already taken" });
+    }
+
+    const sessionId = crypto.randomBytes(16).toString("hex");
+    const { browser, os, deviceName } = parseUserAgent(req.headers["user-agent"]);
+
+    let user = await User.findOne({ email: cleanEmail, password: "" });
+
+    if (user) {
+      user.username = cleanUsername;
+      if (fullName) user.fullName = fullName.trim();
+      if (avatar && !user.avatar) user.avatar = avatar;
+      if (gender) user.gender = gender;
+      if (dob) user.dob = dob;
+      if (avatarConfig) user.avatarConfig = avatarConfig;
+      user.isUsernameSet = true;
+      user.isEmailVerified = true;
+
+      if (!user.sessions) user.sessions = [];
+      user.sessions.push({
+        sessionId,
+        deviceId: deviceId || sessionId,
+        deviceName,
+        browser,
+        os,
+        ip: req.ip || "",
+        isRoot: true,
+        lastActive: new Date(),
+      });
+      await user.save();
+    } else {
+      user = await User.create({
+        fullName: fullName || "KafChat User",
+        username: cleanUsername,
+        email: cleanEmail,
+        password: "",
+        avatar: avatar || "",
+        gender: gender || "Prefer not to say",
+        dob: dob || null,
+        avatarConfig: avatarConfig || {},
+        isUsernameSet: true,
+        isEmailVerified: true,
+        sessions: [{
+          sessionId,
+          deviceId: deviceId || sessionId,
+          deviceName,
+          browser,
+          os,
+          ip: req.ip || "",
+          isRoot: true,
+          lastActive: new Date(),
+        }],
+      });
+    }
+
+    const token = generateToken(user._id, sessionId);
+
+    return res.status(201).json({
+      success: true,
+      token,
+      sessionId,
+      message: "Username set successfully! Welcome to KafChat 🎉",
+      user: {
+        _id: user._id,
+        fullName: user.fullName,
+        username: user.username,
+        email: user.email,
+        avatar: user.avatar,
+        isUsernameSet: user.isUsernameSet,
+        avatarConfig: user.avatarConfig,
+        profilePhotos: user.profilePhotos,
+        bio: user.bio,
+        gender: user.gender,
+        isVIP: user.isVIP,
+        hdUploadEnabled: user.hdUploadEnabled,
+        streakRecoveriesLeft: user.streakRecoveriesLeft,
+        publicKey: user.publicKey,
+        lockPin: user.lockPin,
+      },
+    });
+  } catch (error) {
+    console.error("Set Google Username Error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc Update / Change Username anytime from Settings
+// @route PATCH /api/auth/update-username
+exports.updateUsername = async (req, res) => {
+  try {
+    const { username } = req.body;
+    const userId = req.user._id;
+
+    if (!username || !username.trim()) {
+      return res.status(400).json({ success: false, message: "New username is required" });
+    }
+
+    const cleanUsername = username.toLowerCase().replace(/[^a-z0-9_.]/g, "").trim();
+
+    if (cleanUsername.length < 3) {
+      return res.status(400).json({ success: false, message: "Username must be at least 3 characters" });
+    }
+
+    const existingUser = await User.findOne({ username: cleanUsername });
+    if (existingUser && existingUser._id.toString() !== userId.toString()) {
+      return res.status(400).json({ success: false, message: "This username is already taken" });
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      { username: cleanUsername, isUsernameSet: true },
+      { new: true, runValidators: true }
+    ).select("-password");
+
+    return res.status(200).json({
+      success: true,
+      message: "Username updated successfully! 🚀",
+      user: updatedUser,
+    });
+  } catch (error) {
+    console.error("Update Username Error:", error);
+    return res.status(500).json({ success: false, message: error.message });
   }
 };

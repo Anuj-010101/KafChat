@@ -12,6 +12,10 @@ export const authService = {
   sendEmailOtp: (email) => api.post("/auth/send-email-otp", { email }),
   verifyEmailOtp: (payload) => api.post("/auth/verify-email-otp", payload),
 
+  // Google Username Onboarding & Settings
+  setGoogleUsername: (payload) => api.post("/auth/set-google-username", payload),
+  updateUsername: (username) => api.patch("/auth/update-username", { username }),
+
   // Profile Photos
   uploadProfilePhoto: (photoUrl) => api.post("/auth/profile-photo", { photoUrl }),
   deleteProfilePhoto: (photoId) => api.delete(`/auth/profile-photo/${photoId}`),

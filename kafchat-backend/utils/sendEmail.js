@@ -1,14 +1,15 @@
 const nodemailer = require("nodemailer");
 
 const transporter = nodemailer.createTransport({
-  service: "gmail",
+  host: "smtp.zoho.in",    // 👈 Free account ke liye yeh exact host chalega
+  port: 465,               // 👈 SSL port
+  secure: true,            // 👈 true for port 465
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
-  // 🚀 Serverless optimization timeouts (Prevents infinite hanging)
-  connectionTimeout: 10000, // 10 seconds max to connect
-  socketTimeout: 10000,     // 10 seconds max data transfer
+  connectionTimeout: 10000,
+  socketTimeout: 10000,
 });
 
 const sendOtpEmail = async (toEmail, otp) => {

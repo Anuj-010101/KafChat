@@ -237,6 +237,7 @@ const ProfileModal = ({ onClose }) => {
 
   // Form Fields
   const [fullName, setFullName] = useState(user?.fullName || "");
+  const [username, setUsername] = useState(user?.username || ""); // 👈 Username state added
   const [bio, setBio] = useState(user?.bio || "");
   const [avatar, setAvatar] = useState(user?.avatar || "");
   const [gender, setGender] = useState(user?.gender || "Prefer not to say");
@@ -550,6 +551,12 @@ const ProfileModal = ({ onClose }) => {
         hideReadReceipts,
         hdUploadEnabled,
       });
+
+      // 🚀 Username update API integration
+      if (username.trim() && username.trim().toLowerCase() !== user?.username) {
+        await authService.updateUsername(username.trim());
+      }
+
       toast.success("Profile & Settings saved! 🎉");
     } catch (err) {
       toast.error(err.response?.data?.message || "Failed to update profile");
@@ -1042,6 +1049,21 @@ const ProfileModal = ({ onClose }) => {
                       className="w-full theme-soft-bg border theme-border rounded-xl px-3.5 py-2.5 text-xs theme-text outline-none theme-accent-focus transition"
                       required
                     />
+                  </div>
+
+                  {/* 🚀 Username Input Field */}
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-semibold theme-text">Username</label>
+                    <div className="flex items-center theme-soft-bg border theme-border rounded-xl px-3.5 py-2.5">
+                      <span className="text-xs theme-text-muted font-bold mr-1">@</span>
+                      <input
+                        type="text"
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_.]/g, ""))}
+                        className="w-full bg-transparent text-xs theme-text outline-none font-mono"
+                        required
+                      />
+                    </div>
                   </div>
 
                   <div className="flex flex-col gap-1.5">
@@ -1705,9 +1727,8 @@ const ProfileModal = ({ onClose }) => {
                       <span className="text-xs font-bold theme-text">
                         {(() => {
                           const maxLimit = isVip ? 5.0 : 0.5; // PRO = 5GB, Free = 500MB (0.5GB)
-                          // Har post/reel/DP ko average 5MB man kar dynamic calculate kar rahe hain (ya user ke items ke hisab se)
                           const totalItems = (userPosts?.length || 0) + (userReels?.length || 0) + (profilePhotos?.length || 0);
-                          const usedMb = totalItems * 5; // har item ka 5MB avg
+                          const usedMb = totalItems * 5; 
                           const usedFormatted = usedMb >= 1024 ? `${(usedMb / 1024).toFixed(1)} GB` : `${Math.max(usedMb, 12)} MB`;
                           return `${usedFormatted} / ${maxLimit} GB (${isVip ? "PRO" : "Free"})`;
                         })()}
@@ -1860,7 +1881,7 @@ const ProfileModal = ({ onClose }) => {
                 </div>
               )}
 
-              {/* TOOL 10: USER-DEFINED CHAT & ARCHIVE LOCK PIN */}
+              {/* TOOL 10: CHAT LOCK PIN */}
               {activeTab === "Chat Lock PIN" && (
                 <div className="flex flex-col gap-4">
                   <form onSubmit={handleSavePin} className="flex flex-col gap-4">
@@ -2000,7 +2021,7 @@ const ProfileModal = ({ onClose }) => {
       {/* Forgot PIN Recovery Modal */}
       {showForgotPinModal && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-fadeIn"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-fadeIn"
           onClick={() => setShowForgotPinModal(false)}
         >
           <form
