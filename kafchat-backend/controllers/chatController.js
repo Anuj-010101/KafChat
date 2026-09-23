@@ -18,12 +18,12 @@ exports.accessChat = async (req, res) => {
       isGroupChat: false,
       isSavedCloud: false,
       $and: [
-        { participants: { $elemMatch: { $eq: req.user._id } } },
-        { participants: { $elemMatch: { $eq: userId } } },
+        { participants: { $elemMatch: {$eq: req.user._id } } },
+        { participants: { $elemMatch: {$eq: userId } } },
       ],
     })
-      .populate("participants", "-password")
-      .populate("requestedBy", "fullName username avatar profilePhotos bio")
+      .populate("participants", "fullName username avatar profilePhotos avatarConfig isVIP isOnline bio lastSeen")
+      .populate("requestedBy", "fullName username avatar profilePhotos bio avatarConfig")
       .populate("lastMessage");
 
     if (isChat.length > 0) {
@@ -40,8 +40,8 @@ exports.accessChat = async (req, res) => {
 
     const createdChat = await Chat.create(chatData);
     const fullChat = await Chat.findById(createdChat._id)
-      .populate("participants", "-password")
-      .populate("requestedBy", "fullName username avatar profilePhotos bio");
+      .populate("participants", "fullName username avatar profilePhotos avatarConfig isVIP isOnline bio lastSeen")
+      .populate("requestedBy", "fullName username avatar profilePhotos bio avatarConfig");
 
     await Activity.create({
       recipient: userId,
@@ -64,7 +64,7 @@ exports.accessPersonalVault = async (req, res) => {
       participants: req.user._id,
       isSavedCloud: true,
     })
-      .populate("participants", "-password")
+      .populate("participants", "fullName username avatar profilePhotos avatarConfig isVIP isOnline bio lastSeen")
       .populate("lastMessage");
 
     if (!vaultChat) {
@@ -77,7 +77,10 @@ exports.accessPersonalVault = async (req, res) => {
         requestStatus: "accepted",
       });
 
-      vaultChat = await Chat.findById(vaultChat._id).populate("participants", "-password");
+      vaultChat = await Chat.findById(vaultChat._id).populate(
+        "participants",
+        "fullName username avatar profilePhotos avatarConfig isVIP isOnline bio lastSeen"
+      );
     }
 
     return res.status(200).json({ success: true, chat: vaultChat });
@@ -112,19 +115,18 @@ exports.fetchChats = async (req, res) => {
       });
     }
 
-    // Yahan archived chats ko normal list se filter out kiya gaya hai (jab tak vault code se search na ho)
     const chats = await Chat.find({
-      participants: { $elemMatch: { $eq: userId } },
+      participants: { $elemMatch: {$eq: userId } },
       isSelfChat: { $ne: true },
-      archivedBy: { $ne: userId }, // ✅ Normal list se archived chats hidden rahengi
+      archivedBy: { $ne: userId },
     })
-      .populate("participants", "fullName username avatar profilePhotos avatarBitmojiFallback isVIP isOnline lastSeen publicKey")
-      .populate("requestedBy", "fullName username avatar profilePhotos bio")
-      .populate("groupAdmin", "-password")
-      .populate("groupAdmins", "-password")
+      .populate("participants", "fullName username avatar profilePhotos avatarBitmojiFallback avatarConfig isVIP isOnline lastSeen publicKey")
+      .populate("requestedBy", "fullName username avatar profilePhotos bio avatarConfig")
+      .populate("groupAdmin", "fullName username avatar avatarConfig")
+      .populate("groupAdmins", "fullName username avatar avatarConfig")
       .populate({
         path: "lastMessage",
-        populate: { path: "sender", select: "fullName username isVIP" },
+        populate: { path: "sender", select: "fullName username isVIP avatarConfig" },
       })
       .sort({ updatedAt: -1 });
 
@@ -366,8 +368,8 @@ exports.acceptRequest = async (req, res) => {
     }
 
     const fullChat = await Chat.findById(chat._id)
-      .populate("participants", "-password")
-      .populate("requestedBy", "fullName username avatar bio");
+      .populate("participants", "fullName username avatar profilePhotos avatarConfig isVIP isOnline bio lastSeen")
+      .populate("requestedBy", "fullName username avatar profilePhotos bio avatarConfig");
 
     return res.status(200).json({ success: true, chat: fullChat });
   } catch (error) {
@@ -426,9 +428,9 @@ exports.createGroup = async (req, res) => {
     });
 
     const fullGroupChat = await Chat.findById(groupChat._id)
-      .populate("participants", "-password")
-      .populate("groupAdmin", "-password")
-      .populate("groupAdmins", "-password");
+      .populate("participants", "fullName username avatar profilePhotos avatarConfig isVIP isOnline bio lastSeen")
+      .populate("groupAdmin", "fullName username avatar avatarConfig")
+      .populate("groupAdmins", "fullName username avatar avatarConfig");
 
     return res.status(201).json({ success: true, chat: fullGroupChat });
   } catch (error) {
@@ -452,7 +454,7 @@ exports.setDisappearingTimer = async (req, res) => {
         disappearingActivatedAt: chosenTimer !== "off" ? new Date() : null,
       },
       { new: true }
-    ).populate("participants", "-password");
+    ).populate("participants", "fullName username avatar profilePhotos avatarConfig isVIP isOnline bio lastSeen");
 
     if (!chat) return res.status(404).json({ success: false, message: "Chat not found" });
 
@@ -577,9 +579,9 @@ exports.updateGroupInfo = async (req, res) => {
     if (groupAvatar !== undefined) updates.groupAvatar = groupAvatar;
 
     const chat = await Chat.findByIdAndUpdate(req.params.chatId, updates, { new: true })
-      .populate("participants", "-password")
-      .populate("groupAdmin", "-password")
-      .populate("groupAdmins", "-password");
+      .populate("participants", "fullName username avatar profilePhotos avatarConfig isVIP isOnline bio lastSeen")
+      .populate("groupAdmin", "fullName username avatar avatarConfig")
+      .populate("groupAdmins", "fullName username avatar avatarConfig");
 
     return res.status(200).json({ success: true, chat });
   } catch (error) {
@@ -591,9 +593,9 @@ exports.addMember = async (req, res) => {
   const { chatId, userId } = req.body;
   try {
     const chat = await Chat.findByIdAndUpdate(chatId, { $addToSet: { participants: userId } }, { new: true })
-      .populate("participants", "-password")
-      .populate("groupAdmin", "-password")
-      .populate("groupAdmins", "-password");
+      .populate("participants", "fullName username avatar profilePhotos avatarConfig isVIP isOnline bio lastSeen")
+      .populate("groupAdmin", "fullName username avatar avatarConfig")
+      .populate("groupAdmins", "fullName username avatar avatarConfig");
     return res.status(200).json({ success: true, chat });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
@@ -604,9 +606,9 @@ exports.removeMember = async (req, res) => {
   const { chatId, userId } = req.body;
   try {
     const chat = await Chat.findByIdAndUpdate(chatId, { $pull: { participants: userId, groupAdmins: userId } }, { new: true })
-      .populate("participants", "-password")
-      .populate("groupAdmin", "-password")
-      .populate("groupAdmins", "-password");
+      .populate("participants", "fullName username avatar profilePhotos avatarConfig isVIP isOnline bio lastSeen")
+      .populate("groupAdmin", "fullName username avatar avatarConfig")
+      .populate("groupAdmins", "fullName username avatar avatarConfig");
     return res.status(200).json({ success: true, chat, leftUserId: userId });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
@@ -627,9 +629,9 @@ exports.toggleAdmin = async (req, res) => {
 
     await chat.save();
     const updatedChat = await Chat.findById(chatId)
-      .populate("participants", "-password")
-      .populate("groupAdmin", "-password")
-      .populate("groupAdmins", "-password");
+      .populate("participants", "fullName username avatar profilePhotos avatarConfig isVIP isOnline bio lastSeen")
+      .populate("groupAdmin", "fullName username avatar avatarConfig")
+      .populate("groupAdmins", "fullName username avatar avatarConfig");
 
     return res.status(200).json({ success: true, chat: updatedChat });
   } catch (error) {

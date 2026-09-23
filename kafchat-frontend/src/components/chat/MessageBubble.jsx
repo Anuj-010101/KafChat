@@ -15,6 +15,7 @@ import {
   FiBookmark,
   FiShare2,
   FiAtSign,
+  FiRefreshCw,
 } from "react-icons/fi";
 import Avatar from "../common/Avatar";
 import { formatTime } from "../../utils/formatTime";
@@ -674,6 +675,28 @@ const MessageBubble = ({ message }) => {
                   className="w-full px-2.5 py-1.5 rounded-xl hover:theme-soft-bg text-left text-xs font-medium theme-text flex items-center gap-2 transition"
                 >
                   <FiCopy size={13} /> Copy Text
+                </button>
+              )}
+
+              {/* 🔄 Snapchat-Style Repeat Snap Option */}
+              {message.isDisappearing && !isSender && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const { data } = await api.post(`/messages/${message._id}/replay`);
+                      if (data.success) {
+                        toast.success("Snap replayed! 🔄");
+                        window.location.reload();
+                      }
+                    } catch (err) {
+                      toast.error(err.response?.data?.message || "Snap replay limit reached");
+                    }
+                    setShowMenu(false);
+                  }}
+                  className="w-full px-2.5 py-1.5 rounded-xl hover:theme-soft-bg text-left text-xs font-medium text-cyan-400 flex items-center gap-2 transition"
+                >
+                  <FiRefreshCw size={13} /> Repeat Snap ({message.replayCount || 0}/1 used)
                 </button>
               )}
 

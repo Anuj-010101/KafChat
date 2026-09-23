@@ -43,7 +43,7 @@ const DualProfileBanner = ({ user, isSelf, onEditAvatar, onChangeDp, onViewFullD
             onClick={onEditAvatar}
             className="absolute top-2.5 right-2.5 px-3 py-1.5 rounded-xl bg-black/60 hover:bg-black/80 backdrop-blur-md text-white text-[11px] font-semibold flex items-center gap-1.5 shadow-lg border border-white/20 transition opacity-90 sm:opacity-0 group-hover:opacity-100"
           >
-            🎨 Edit Snap Avatar
+            🎨 Edit Avatar
           </button>
         )}
       </div>

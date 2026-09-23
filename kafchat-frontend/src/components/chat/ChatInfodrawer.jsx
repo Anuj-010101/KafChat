@@ -754,14 +754,6 @@ const ChatInfoDrawer = ({ isOpen, onClose, messages, onStartCall }) => {
               >
                 <FiFilm size={12} /> Reels ({reelsList.length})
               </button>
-              <button
-                onClick={() => setMediaTab("snaps")}
-                className={`px-2.5 py-1 rounded-xl whitespace-nowrap flex items-center gap-1 transition ${
-                  mediaTab === "snaps" ? "theme-accent-bg text-white" : "theme-text-muted hover:theme-text"
-                }`}
-              >
-                <FiZap size={12} /> Snaps ({snapsList.length})
-              </button>
             </div>
 
             <div className="pt-1 min-h-[90px]">
@@ -863,18 +855,6 @@ const ChatInfoDrawer = ({ isOpen, onClose, messages, onStartCall }) => {
                       No reels or video clips.
                     </div>
                   )}
-                </div>
-              )}
-
-              {mediaTab === "snaps" && (
-                <div className="flex flex-col items-center justify-center p-4 text-center">
-                  <div className="w-10 h-10 rounded-full bg-yellow-500/20 text-yellow-500 flex items-center justify-center mb-1.5">
-                    <FiZap size={18} />
-                  </div>
-                  <span className="text-xs font-semibold theme-text">Snap Hub Active</span>
-                  <span className="text-[10px] theme-text-muted mt-0.5">
-                    View-once media expires after watching.
-                  </span>
                 </div>
               )}
             </div>

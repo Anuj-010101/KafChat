@@ -616,7 +616,15 @@ const Sidebar = ({ mobileVisible }) => {
                                 <FiMic size={11} /> Voice Note ({lastMsg.voiceDurationSec}s)
                               </span>
                             ) : (
-                              <span className="truncate">{lastMsg?.text || "Started conversation"}</span>
+                              <span className="truncate flex items-center gap-1">
+                                {lastMsg?.mediaType === "image" && lastMsg?.isDisappearing ? (
+                                <span className="text-amber-400 font-semibold flex items-center gap-1">
+      📷 Snap
+                                </span>
+                              ) : (
+                                lastMsg?.text || "Started conversation"
+                              )}
+                              </span>
                             )}
                           </div>
                         </div>

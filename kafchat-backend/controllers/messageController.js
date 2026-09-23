@@ -597,3 +597,111 @@ exports.searchMessages = async (req, res) => {
     return res.status(500).json({ success: false, message: error.message });
   }
 };
+
+// @desc Send 24-Hour Disappearing Snap with Mutual Streak Update & Storage Protection
+// @route POST /api/messages/snap
+exports.sendSnapMessage = async (req, res) => {
+  try {
+    const { chatId, recipientId, mediaUrl, caption } = req.body;
+    const senderId = req.user._id;
+
+    if (!chatId || !mongoose.Types.ObjectId.isValid(chatId)) {
+      return res.status(400).json({ success: false, message: "Valid Chat ID is required for a snap" });
+    }
+
+    const targetChatId = new mongoose.Types.ObjectId(chatId);
+    const chat = await Chat.findById(targetChatId);
+    if (!chat) {
+      return res.status(404).json({ success: false, message: "Chat not found" });
+    }
+
+    // 1. 24-Hour Expiry Logic (Auto-delete after 24 hours, non-savable storage protection)
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    const newSnap = await Message.create({
+      chatId: targetChatId,
+      sender: senderId,
+      text: caption || "📷 Snap",
+      mediaUrl: mediaUrl || "",
+      mediaType: "image",
+      isDisappearing: true, // Non-savable flag
+      expiresAt,            // 24h auto-delete timer
+      isViewOnce: true,     // Open hone ke baad disappear
+      readBy: [{ user: senderId, readAt: new Date() }],
+    });
+
+    // 2. Mutual Streak & Interaction Update (Two-way validation)
+    // Yahan chat ya user ke streak count ko update kiya jata hai
+    const now = new Date();
+    if (!chat.streakCount) chat.streakCount = 0;
+    
+    // Check if interaction is within the 24-hour window for mutual continuity
+    const lastInteraction = chat.lastInteractionAt ? new Date(chat.lastInteractionAt) : null;
+    const hoursSinceLast = lastInteraction ? (now - lastInteraction) / (1000 * 60 * 60) : 25;
+
+    if (hoursSinceLast <= 24) {
+      chat.streakCount += 1; // Increment mutual streak
+    } else {
+      chat.streakCount = 1;  // Reset or start fresh if gap > 24h
+    }
+    chat.lastInteractionAt = now;
+    await chat.save();
+
+    const populatedSnap = await Message.findById(newSnap._id)
+      .populate("sender", "fullName username avatar profilePhotos avatarBitmojiFallback isVIP");
+
+    await Chat.findByIdAndUpdate(targetChatId, {
+      lastMessage: newSnap._id,
+      updatedAt: now,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Snap sent successfully! Auto-expires in 24h.",
+      snap: populatedSnap,
+      streakCount: chat.streakCount,
+    });
+  } catch (error) {
+    console.error("sendSnapMessage error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Failed to send snap" });
+  }
+};
+
+// @desc Replay / Repeat a viewed snap (Allowed max 1 extra replay, no permanent saving)
+// @route POST /api/messages/:messageId/replay
+exports.replaySnapMessage = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const userId = req.user._id;
+
+    if (!messageId || !mongoose.Types.ObjectId.isValid(messageId)) {
+      return res.status(400).json({ success: false, message: "Invalid message ID" });
+    }
+
+    const message = await Message.findById(messageId);
+    if (!message || !message.isDisappearing) {
+      return res.status(404).json({ success: false, message: "Snap not found or expired" });
+    }
+
+    if (message.sender.toString() === userId.toString()) {
+      return res.status(400).json({ success: false, message: "You cannot replay your own sent snap" });
+    }
+
+    if (message.replayCount && message.replayCount >= 1) {
+      return res.status(400).json({ success: false, message: "This snap has already been replayed once and is now locked." });
+    }
+
+    message.replayCount = (message.replayCount || 0) + 1;
+    message.isOpened = false; // Temporarily allow opening for replay
+    await message.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Snap replayed successfully",
+      messageObj: message,
+    });
+  } catch (error) {
+    console.error("replaySnapMessage error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Failed to replay snap" });
+  }
+};

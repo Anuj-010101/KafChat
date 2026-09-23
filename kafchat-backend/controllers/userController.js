@@ -15,9 +15,10 @@ exports.getUserByUsername = async (req, res) => {
       return res.status(400).json({ success: false, message: "Username is required" });
     }
 
+    // userController.js ke andar getUserByUsername aur getUserById me:
     const user = await User.findOne({
-      username: { $regex: new RegExp(`^${escapeRegex(rawUsername)}$`, "i") },
-    }).select("fullName username avatar profilePhotos isVIP bio isPrivateAccount followers following");
+     username: { $regex: new RegExp(`^${escapeRegex(rawUsername)}$`, "i") },
+    }).select("fullName username avatar profilePhotos avatarConfig isVIP bio isPrivateAccount followers following");
 
     if (!user) {
       return res.status(404).json({ success: false, message: `@${rawUsername} not found` });
@@ -105,7 +106,7 @@ exports.getUserProfileWithPosts = async (req, res) => {
   try {
     const targetUserId = req.params.id;
     const targetUser = await User.findById(targetUserId)
-      .select("-password -lockPin -otp -otpExpires")
+      .select("-password -lockPin -otp -otpExpires") // Yeh ensure karta hai ki avatarConfig hide na ho
       .populate("followers", "_id")
       .populate("following", "_id");
 
@@ -122,7 +123,7 @@ exports.getUserProfileWithPosts = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      user: targetUser,
+      user: targetUser, // Iske andar ab avatarConfig automatically included aayega
       posts: targetUser.isPrivateAccount ? [] : posts,
     });
   } catch (error) {
@@ -263,14 +264,14 @@ exports.unfollowUser = async (req, res) => {
   }
 };
 
-// @desc Get full user profile
-// @route GET /api/users/:id
 exports.getUserById = async (req, res) => {
   try {
     const user = await User.findById(req.params.id)
-      .select("-password -lockPin -otp -otpExpires")
-      .populate("followers", "fullName username avatar profilePhotos")
-      .populate("following", "fullName username avatar profilePhotos");
+      .select("-password -lockPin -otp -otpExpires") // Yahan se ensure karein ki avatarConfig exclude na ho (minus hataya hua ho ya explicitly select ho)
+      .populate("followers", "fullName username avatar profilePhotos avatarConfig")
+      .populate("following", "fullName username avatar profilePhotos avatarConfig");
+    
+    // ... baaki code wahi rahega
 
     if (!user) return res.status(404).json({ success: false, message: "User not found" });
 
@@ -292,6 +293,8 @@ exports.getUserById = async (req, res) => {
 
 // @desc Update user profile
 // @route PATCH /api/users/profile
+// @desc Update user profile
+// @route PATCH /api/users/profile
 exports.updateProfile = async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
@@ -302,6 +305,7 @@ exports.updateProfile = async (req, res) => {
       bio,
       avatar,
       profilePhotos,
+      avatarConfig, // 👈 Yeh yahan add kiya hai taaki 3D avatar config save ho sake
       gender,
       dob,
       location,
@@ -316,6 +320,7 @@ exports.updateProfile = async (req, res) => {
     if (fullName) user.fullName = fullName.trim();
     if (bio !== undefined) user.bio = bio;
     if (avatar) user.avatar = avatar;
+    if (avatarConfig !== undefined) user.avatarConfig = avatarConfig; // 👈 Database me 3D avatar save karne ke liye
 
     if (Array.isArray(profilePhotos)) {
       const maxAllowed = user.isVIP ? 5 : 1;

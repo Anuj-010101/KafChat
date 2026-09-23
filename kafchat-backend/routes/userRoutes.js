@@ -18,7 +18,7 @@ const {
   getUserNetwork,
   getUserProfileWithPosts,
   unfollowUser,
-  followUser, // ✅ Yeh yahan zaroor hona chahiye
+  followUser,
 } = require("../controllers/userController");
 
 router.use(protect);

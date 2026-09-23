@@ -17,6 +17,8 @@ const {
   clearChat,
   reactToMessage,
   searchMessages,
+  sendSnapMessage,     
+  replaySnapMessage,   
 } = require("../controllers/messageController");
 
 // Base & Batch Upload Routes
@@ -24,6 +26,10 @@ router.get("/:chatId", protect, getMessages);
 router.post("/", protect, sendMessage);
 router.post("/upload-batch", protect, uploadMultiple, uploadBatchFiles);
 router.post("/cleanup-snap/:chatId", protect, cleanupSnapMessages);
+
+// 📸 Snap & Replay Routes
+router.post("/snap", protect, sendSnapMessage);
+router.post("/:messageId/replay", protect, replaySnapMessage);
 
 // Actions, Pinned & Reactions
 router.patch("/read/:chatId", protect, markAsRead);
