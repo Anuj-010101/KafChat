@@ -1,27 +1,43 @@
-const { Resend } = require('resend');
+const nodemailer = require('nodemailer');
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+const transporter = nodemailer.createTransport({
+  host: process.env.EMAIL_HOST || 'smtp.zoho.in',
+  port: 465,
+  secure: true,
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS
+  }
+});
 
 const sendOtpEmail = async (toEmail, otp) => {
   try {
-    const data = await resend.emails.send({
-      from: 'KafChat <onboarding@resend.dev>', // Free tier ka default sender
-      to: [toEmail],
+    const mailOptions = {
+      from: `"KafChat" <${process.env.EMAIL_USER}>`,
+      to: toEmail,
       subject: 'Your KafChat Verification Code',
       html: `
-        <div style="font-family: Arial, sans-serif; padding: 25px; color: #1e293b; max-width: 500px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
-          <h2 style="color: #6366f1; margin-top: 0;">Welcome to KafChat</h2>
-          <p style="font-size: 15px; color: #475569;">Use the following 6-digit code to verify your account or login:</p>
-          <div style="background: #f8fafc; border: 1px dashed #6366f1; border-radius: 8px; text-align: center; padding: 15px; margin: 20px 0;">
-            <h1 style="color: #0f172a; letter-spacing: 6px; font-size: 36px; margin: 0;">${otp}</h1>
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9; border-radius: 8px; border: 1px solid #e0e0e0;">
+          <h2 style="color: #4F46E5; text-align: center;">KafChat Verification</h2>
+          <p style="font-size: 16px; color: #333;">Hello,</p>
+          <p style="font-size: 16px; color: #333;">Your One-Time Password (OTP) for login/signup is:</p>
+          <div style="text-align: center; margin: 25px 0;">
+            <span style="font-size: 28px; font-weight: bold; color: #fff; background-color: #4F46E5; padding: 12px 24px; letter-spacing: 4px; border-radius: 6px; display: inline-block;">
+              ${otp}
+            </span>
           </div>
-          <p style="color: #64748b; font-size: 13px; margin-bottom: 0;">This code will expire in 5 minutes. Please do not share it with anyone.</p>
+          <p style="font-size: 14px; color: #666; text-align: center;">This code is valid for a limited time. Do not share it with anyone.</p>
+          <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
+          <p style="font-size: 12px; color: #999; text-align: center;">&copy; KafChat Platform. All rights reserved.</p>
         </div>
-      `,
-    });
-    return data;
+      `
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log("Styled OTP email sent successfully:", info.response);
+    return true;
   } catch (error) {
-    console.error("Resend Error:", error);
+    console.error("Email Error:", error);
     throw error;
   }
 };
