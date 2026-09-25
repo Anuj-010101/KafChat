@@ -96,12 +96,13 @@ exports.getMessages = async (req, res) => {
   }
 };
 
-// @desc Send a new message (E2EE payload, Waveform Voice Notes, Polls)
+// @desc Send a new message (Auto-creates pending request chat if it doesn't exist or if temp chat is used)
 // @route POST /api/messages
 exports.sendMessage = async (req, res) => {
   try {
     const {
       chatId,
+      recipientId, 
       text,
       encryptedContent,
       iv,
@@ -123,12 +124,50 @@ exports.sendMessage = async (req, res) => {
     } = req.body;
 
     const senderId = req.user._id;
+    let targetChatId = chatId;
 
-    if (!chatId || !mongoose.Types.ObjectId.isValid(chatId)) {
-      return res.status(400).json({ success: false, message: "Valid Chat ID is required" });
+    // Agar chatId temporary hai (jaise "temp_...") ya valid nahi hai
+    if (!targetChatId || !mongoose.Types.ObjectId.isValid(targetChatId)) {
+      // Agar recipientId body me nahi hai, toh activeChat ya participants se nikalne ki koshish karein
+      let actualRecipientId = recipientId;
+      
+      if (!actualRecipientId && chatId && chatId.startsWith("temp_")) {
+        actualRecipientId = chatId.replace("temp_", "");
+      }
+
+      if (!actualRecipientId || !mongoose.Types.ObjectId.isValid(actualRecipientId)) {
+        return res.status(400).json({ success: false, message: "Valid recipientId is required for new requests" });
+      }
+
+      // Check karein kya inke beech pehle se koi chat mojood hai
+      let existingChat = await Chat.findOne({
+        isGroupChat: false,
+        isSavedCloud: false,
+        participants: { $all: [senderId, actualRecipientId] },
+      });
+
+      if (existingChat) {
+        targetChatId = existingChat._id;
+      } else {
+        // Naya chat pending status ke sath create hoga kyunki pehla message bheja ja raha hai!
+        const newChat = await Chat.create({
+          chatName: "sender",
+          isGroupChat: false,
+          participants: [senderId, actualRecipientId],
+          requestStatus: "pending",
+          requestedBy: senderId,
+        });
+        targetChatId = newChat._id;
+
+        // Follow request activity create karein
+        await Activity.create({
+          recipient: actualRecipientId,
+          sender: senderId,
+          type: "FOLLOW_REQUEST",
+          status: "PENDING",
+        });
+      }
     }
-
-    const targetChatId = new mongoose.Types.ObjectId(chatId);
 
     const chat = await Chat.findById(targetChatId);
     if (!chat) {
@@ -184,6 +223,7 @@ exports.sendMessage = async (req, res) => {
     return res.status(201).json({
       success: true,
       message: populatedMessage,
+      chatId: targetChatId,
     });
   } catch (error) {
     console.error("sendMessage error:", error);

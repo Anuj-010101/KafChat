@@ -198,8 +198,13 @@ export const ChatProvider = ({ children }) => {
       }
 
       try {
+        // Agar chat temporary hai (jaise "temp_..."), toh recipientId bhi bhejna zaroori hai backend ke liye
+        const isTempChat = activeChat.isTemp || activeChat._id?.toString().startsWith("temp_");
+        const recipientId = isTempChat ? otherParticipant?._id?.toString() : null;
+
         const { data } = await messageService.sendMessage({
-          chatId: activeChat._id,
+          chatId: isTempChat ? null : activeChat._id,
+          recipientId,
           text: activeChat.isGroupChat ? text : encryptedContent ? "" : text,
           encryptedContent,
           iv,
@@ -215,22 +220,36 @@ export const ChatProvider = ({ children }) => {
         });
 
         const newMsg = { ...data.message, text };
+        const realChatId = data.chatId; // Backend se jo real chat ID aayi hai
+
         setMessages((prev) => [...prev, newMsg]);
         setReplyingMessage(null);
 
         const socket = getSocket();
         socket?.emit("send_e2ee_message", {
-          chatId: activeChat._id,
+          chatId: realChatId || activeChat._id,
           message: newMsg,
         });
 
-        setChats((prev) =>
-          prev
-            .map((c) =>
-              c._id === activeChat._id ? { ...c, lastMessage: newMsg, unreadCount: 0 } : c
-            )
-            .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
-        );
+        // Agar yeh pehla message tha (temp chat thi), toh activeChat ko real chat ID se update kar do
+        if (isTempChat && realChatId) {
+          const updatedChat = {
+            ...activeChat,
+            _id: realChatId,
+            isTemp: false,
+            requestStatus: "pending"
+          };
+          setActiveChat(updatedChat);
+          setChats((prev) => [updatedChat, ...prev.filter(c => c._id !== activeChat._id)]);
+        } else {
+          setChats((prev) =>
+            prev
+              .map((c) =>
+                c._id === activeChat._id ? { ...c, lastMessage: newMsg, unreadCount: 0 } : c
+              )
+              .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+          );
+        }
       } catch (err) {
         toast.error(err.response?.data?.message || "Message failed to send");
       }
@@ -614,7 +633,22 @@ export const ChatProvider = ({ children }) => {
     async (otherUserId) => {
       try {
         const { data } = await chatService.accessChat(otherUserId);
-        const newChat = data.chat || data;
+        
+        if (!data.chat) {
+          // Agar chat pehle se nahi hai, toh ek temporary/draft chat object bana lo 
+          // jisse bina error ke message box khul jaye aur pehla message bhejte hi chat create ho jaye.
+          const tempChat = {
+            _id: null, // ID null rahegi taaki messages fetch API call na ho
+            participants: [currentUserId, otherUserId],
+            requestStatus: "pending",
+            isDraft: true
+          };
+          setActiveChat(tempChat);
+          setMessages([]);
+          return tempChat;
+        }
+
+        const newChat = data.chat;
         setChats((prev) => {
           const exists = prev.some((c) => c._id === newChat._id);
           return exists ? prev : [newChat, ...prev];
@@ -625,7 +659,7 @@ export const ChatProvider = ({ children }) => {
         toast.error(err.response?.data?.message || "Couldn't start chat");
       }
     },
-    [openChat]
+    [openChat, currentUserId]
   );
 
   const acceptRequest = useCallback(async (chatId) => {

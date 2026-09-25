@@ -36,9 +36,11 @@ const ActivityFeed = ({ onClose }) => {
     try {
       const { data } = await api.post(`/social/follow-request/${reqId}/accept`);
       if (data.success) {
-        setPendingRequests((prev) => prev.filter((r) => r._id !== reqId));
+        // Item ko remove karne ki jagah uska status 'accepted' set kar dein
+        setPendingRequests((prev) =>
+          prev.map((r) => (r._id === reqId ? { ...r, status: "ACCEPTED" } : r))
+        );
         toast.success(`Accepted request from @${senderUsername || "user"}! 🎉`);
-        fetchActivity();
       }
     } catch (err) {
       toast.error(err.response?.data?.message || "Failed to accept request");

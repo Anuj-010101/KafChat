@@ -17,40 +17,21 @@ exports.accessChat = async (req, res) => {
     let isChat = await Chat.find({
       isGroupChat: false,
       isSavedCloud: false,
-      $and: [
-        { participants: { $elemMatch: {$eq: req.user._id } } },
-        { participants: { $elemMatch: {$eq: userId } } },
-      ],
+      participants: { $all: [req.user._id, userId] },
     })
       .populate("participants", "fullName username avatar profilePhotos avatarConfig isVIP isOnline bio lastSeen")
-      .populate("requestedBy", "fullName username avatar profilePhotos bio avatarConfig")
+      .populate("requestedBy", "fullName username avatar profilePhotos bio avatarConfig") // <-- Yahin par fullName aur username add karna hai
       .populate("lastMessage");
 
     if (isChat.length > 0) {
       return res.status(200).json({ success: true, chat: isChat[0] });
     }
 
-    const chatData = {
-      chatName: "sender",
-      isGroupChat: false,
-      participants: [req.user._id, userId],
-      requestStatus: "pending",
-      requestedBy: req.user._id,
-    };
-
-    const createdChat = await Chat.create(chatData);
-    const fullChat = await Chat.findById(createdChat._id)
-      .populate("participants", "fullName username avatar profilePhotos avatarConfig isVIP isOnline bio lastSeen")
-      .populate("requestedBy", "fullName username avatar profilePhotos bio avatarConfig");
-
-    await Activity.create({
-      recipient: userId,
-      sender: req.user._id,
-      type: "FOLLOW_REQUEST",
-      status: "PENDING",
+    return res.status(200).json({ 
+      success: true, 
+      chat: null, 
+      message: "No existing chat. Send a message to initiate request." 
     });
-
-    return res.status(201).json({ success: true, chat: fullChat });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
@@ -89,7 +70,7 @@ exports.accessPersonalVault = async (req, res) => {
   }
 };
 
-// @desc Fetch All User Chats (Excludes Vault/Archived Chats from normal view)
+// @desc Fetch All User Chats (Includes Archived/Vault for filtering)
 // @route GET /api/chats
 exports.fetchChats = async (req, res) => {
   try {
@@ -115,10 +96,11 @@ exports.fetchChats = async (req, res) => {
       });
     }
 
+    // 🚀 FIXED: Yahan se 'archivedBy: { $ne: userId }' hata diya hai taaki sabhi chats fetch ho sakein, 
+    // aur frontend apne hisaab se normal ya archived list me dikha sake.
     const chats = await Chat.find({
       participants: { $elemMatch: {$eq: userId } },
       isSelfChat: { $ne: true },
-      archivedBy: { $ne: userId },
     })
       .populate("participants", "fullName username avatar profilePhotos avatarBitmojiFallback avatarConfig isVIP isOnline lastSeen publicKey")
       .populate("requestedBy", "fullName username avatar profilePhotos bio avatarConfig")
@@ -369,7 +351,7 @@ exports.acceptRequest = async (req, res) => {
 
     const fullChat = await Chat.findById(chat._id)
       .populate("participants", "fullName username avatar profilePhotos avatarConfig isVIP isOnline bio lastSeen")
-      .populate("requestedBy", "fullName username avatar profilePhotos bio avatarConfig");
+      .populate("requestedBy", "fullName username avatar profilePhotos bio avatarConfig"); // <-- Yahin par bhi check karein
 
     return res.status(200).json({ success: true, chat: fullChat });
   } catch (error) {

@@ -29,6 +29,7 @@ import {
   FiSlash,
   FiArchive,
 } from "react-icons/fi";
+
 import Avatar from "../common/Avatar";
 import StatusBar from "../status/StatusBar";
 import ReelsFeedModal from "../social/ReelsFeedModal";
@@ -37,6 +38,7 @@ import ProfileModal from "../profile/ProfileModal";
 import VipProModal from "../profile/VipProModal";
 import ActivityFeed from "../social/ActivityFeed";
 import CreateGroupModal from "../chat/CreateGroupModal";
+import UserProfileModal from "../common/UserProfileModal";
 import { useChat } from "../../hooks/useChat";
 import { useAuth } from "../../hooks/useAuth";
 import api from "../../services/api";
@@ -54,6 +56,7 @@ const Sidebar = ({ mobileVisible }) => {
     fetchChats,
   } = useChat();
 
+  const [selectedProfileUsername, setSelectedProfileUsername] = useState(null); // 👈 Profile modal state
   const [filterTab, setFilterTab] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [dbSearchResults, setDbSearchResults] = useState([]);
@@ -109,6 +112,30 @@ const Sidebar = ({ mobileVisible }) => {
       searchQuery.trim().replace(/^\$/, "") === userPin
   );
 
+  // 🚀 FIXED: Archived ya Locked chats wale users ki IDs extract karne ke liye
+  const hiddenOrLockedUserIds = useMemo(() => {
+    const ids = new Set();
+    (chats || []).forEach((c) => {
+      if (c.isLocked || c.isArchived) {
+        c.participants?.forEach((p) => {
+          const pId = (p?._id || p)?.toString();
+          if (pId && pId !== currentUserId) {
+            ids.add(pId);
+          }
+        });
+      }
+    });
+    return ids;
+  }, [chats, currentUserId]);
+
+  // 🚀 FIXED: Global search results ko hidden/locked users se filter karne ke liye
+  const filteredDbSearchResults = useMemo(() => {
+    return dbSearchResults.filter((u) => {
+      const uId = (u?._id || u?.id)?.toString();
+      return !hiddenOrLockedUserIds.has(uId);
+    });
+  }, [dbSearchResults, hiddenOrLockedUserIds]);
+
   useEffect(() => {
     const fetchSuggestionsAndContacts = async () => {
       try {
@@ -139,6 +166,19 @@ const Sidebar = ({ mobileVisible }) => {
     };
     fetchSuggestionsAndContacts();
   }, [currentUserId]);
+
+  // 🚀 Activity unread count check karne ke liye
+  useEffect(() => {
+    const checkActivityUnread = async () => {
+      try {
+        const { data } = await api.get("/social/activity");
+        if (data?.unreadCount > 0) {
+          setHasUnreadActivity(true);
+        }
+      } catch {}
+    };
+    checkActivityUnread();
+  }, []);
 
   useEffect(() => {
     const handleOutsideClick = (e) => {
@@ -271,6 +311,20 @@ const Sidebar = ({ mobileVisible }) => {
     }
   };
 
+  const handleSendFollowFromSearch = async (targetUserId) => {
+    if (!targetUserId) return;
+    try {
+      const { data } = await api.post(`/social/follow/${targetUserId}`);
+      if (data.success) {
+        toast.success(data.message || "Follow request sent!");
+        setSearchQuery("");
+        setDbSearchResults([]);
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to send follow request");
+    }
+  };
+
   const fetchLinkedAccounts = async () => {
     try {
       const { data } = await api.get("/auth/linked-accounts");
@@ -313,7 +367,12 @@ const Sidebar = ({ mobileVisible }) => {
           return c.isLocked || c.isArchived;
         }
 
+        // 🛑 👉 YAHAN PASTE KAREIN:
+        if (filterTab === "all" && c.requestStatus === "pending") return false;
+
         if (rawQuery.length > 0 && !rawQuery.startsWith("$")) {
+          if (c.isLocked || c.isArchived) return false;
+
           const cleanQ = rawQuery.replace(/^@+/, "").toLowerCase();
           const other = c.participants?.find(
             (p) => (p?._id || p)?.toString() !== currentUserId
@@ -336,7 +395,7 @@ const Sidebar = ({ mobileVisible }) => {
           return isFav;
         }
 
-        if (filterTab === "personal") return !c.isGroupChat && !c.isSavedCloud;
+        if (filterTab === "requests") return c.requestStatus === "pending";
         if (filterTab === "groups") return c.isGroupChat;
         return true;
       });
@@ -363,9 +422,14 @@ const Sidebar = ({ mobileVisible }) => {
       .filter((c) => c && !c.isSelfChat && !c.isLocked && !c.isArchived && (Number(c?.unreadCount) || 0) > 0).length;
   }, [chats]);
 
-  const handleOpenTopActivity = () => {
+  const handleOpenTopActivity = async () => {
     setShowActivityModal(true);
     setHasUnreadActivity(false);
+    
+    try {
+      await api.patch("/social/activity/read");
+    } catch {}
+
     localStorage.setItem(`last_viewed_activity_${user?._id}`, Date.now().toString());
   };
 
@@ -490,8 +554,8 @@ const Sidebar = ({ mobileVisible }) => {
                 { id: "all", label: "All" },
                 { id: "unread", label: "Unread", count: totalUnread },
                 { id: "favorites", label: "Favorites" },
-                { id: "personal", label: "Direct" },
                 { id: "groups", label: "Groups" },
+                { id: "requests", label: "Requests" },
               ].map((tab) => (
                 <button
                   key={tab.id}
@@ -619,7 +683,7 @@ const Sidebar = ({ mobileVisible }) => {
                               <span className="truncate flex items-center gap-1">
                                 {lastMsg?.mediaType === "image" && lastMsg?.isDisappearing ? (
                                 <span className="text-amber-400 font-semibold flex items-center gap-1">
-      📷 Snap
+                                  📷 Snap
                                 </span>
                               ) : (
                                 lastMsg?.text || "Started conversation"
@@ -719,37 +783,45 @@ const Sidebar = ({ mobileVisible }) => {
                 </div>
               )}
 
-              {/* Global Database User Search Results */}
+              {/* Global Database User Search Results - Instagram Style DP/Name click */}
               <div className="flex flex-col gap-2 mt-2">
                 <span className="text-[11px] font-bold theme-text-muted uppercase tracking-wider px-1">
-                  Global Users ({dbSearchResults.length})
+                  Global Users ({filteredDbSearchResults.length})
                 </span>
                 {isSearchingDb ? (
                   <div className="py-6 text-center">
                     <div className="w-5 h-5 mx-auto rounded-full border-2 theme-accent-border border-t-transparent animate-spin" />
                   </div>
-                ) : dbSearchResults.length === 0 ? (
+                ) : filteredDbSearchResults.length === 0 ? (
                   <div className="py-6 text-center text-xs theme-text-muted">
                     No global users found matching "@{searchQuery.replace(/^@+/, "")}".
                   </div>
                 ) : (
                   <div className="flex flex-col gap-1.5">
-                    {dbSearchResults.map((userObj) => (
+                    {filteredDbSearchResults.map((userObj) => (
                       <div
                         key={userObj._id || userObj.id}
-                        onClick={() => handleStartChatWithSearchedUser(userObj)}
-                        className="p-3 rounded-2xl theme-soft-bg border theme-border flex items-center justify-between gap-3 cursor-pointer hover:theme-accent-tint transition"
+                        className="p-3 rounded-2xl theme-soft-bg border theme-border flex items-center justify-between gap-3 transition"
                       >
-                        <div className="flex items-center gap-2.5 min-w-0">
+                        {/* 👇 DP ya Name par click karne par User Profile Modal khulega */}
+                        <div 
+                          className="flex items-center gap-2.5 min-w-0 cursor-pointer flex-1"
+                          onClick={() => setSelectedProfileUsername(userObj.username)}
+                        >
                           <Avatar src={userObj.avatar} alt={userObj.fullName} size="sm" />
                           <div className="flex flex-col min-w-0">
                             <span className="text-xs font-bold theme-text truncate">{userObj.fullName}</span>
                             <span className="text-[10px] theme-text-muted font-mono truncate">@{userObj.username}</span>
                           </div>
                         </div>
-                        <span className="px-3 py-1 rounded-xl theme-accent-bg text-white text-[10px] font-bold transition shrink-0">
-                          Chat
-                        </span>
+
+                        <button
+                          type="button"
+                          onClick={() => handleSendFollowFromSearch(userObj._id || userObj.id)}
+                          className="px-3 py-1 rounded-xl theme-accent-bg text-white text-[10px] font-bold hover:opacity-90 transition shrink-0 cursor-pointer"
+                        >
+                          Follow
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -1031,6 +1103,14 @@ const Sidebar = ({ mobileVisible }) => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* User Profile Modal Integration */}
+      {selectedProfileUsername && (
+        <UserProfileModal
+          username={selectedProfileUsername}
+          onClose={() => setSelectedProfileUsername(null)}
+        />
       )}
     </>
   );

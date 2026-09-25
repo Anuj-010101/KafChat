@@ -11,7 +11,7 @@ import { useChat } from "../../hooks/useChat";
 import { useAuth } from "../../hooks/useAuth";
 import { formatLastSeen } from "../../utils/formatTime";
 
-const ChatHeader = ({ onOpenInfo, onStartCall }) => {
+const ChatHeader = ({ chatUser, onOpenInfo, onStartCall }) => {
   const { user } = useAuth();
   const { activeChat, closeChat } = useChat();
 
@@ -19,9 +19,12 @@ const ChatHeader = ({ onOpenInfo, onStartCall }) => {
   const isGroup = Boolean(activeChat?.isGroupChat);
   const isCloud = Boolean(activeChat?.isSavedCloud);
 
-  const other = activeChat?.participants?.find(
+  const defaultOther = activeChat?.participants?.find(
     (p) => (p?._id || p)?.toString() !== currentUserId
   );
+
+  // Agar chatUser prop (jaise requesterProfile) mila hai toh use primary maanein
+  const other = chatUser || defaultOther;
 
   const isOtherOnline = Boolean(other?.isOnline) && !Boolean(other?.isGhostModeActive);
   const isLocked = Boolean(activeChat?.isLocked);
@@ -60,7 +63,7 @@ const ChatHeader = ({ onOpenInfo, onStartCall }) => {
                   ? "Saved Messages"
                   : isGroup
                   ? activeChat.chatName
-                  : other?.fullName || "User"}
+                  : other?.fullName || other?.name || "User"}
               </span>
               {other?.isVIP && (
                 <span className="px-1.5 py-0.2 rounded-full bg-amber-500 text-black text-[8px] font-black">

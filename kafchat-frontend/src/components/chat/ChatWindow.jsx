@@ -50,11 +50,7 @@ const ChatWindow = () => {
   const [restoringStreak, setRestoringStreak] = useState(false);
   const [selectedStoryGroupForView, setSelectedStoryGroupForView] = useState(null);
   const [reshareDataForModal, setReshareDataForModal] = useState(null);
-
-  const otherParticipant = activeChat?.participants?.find(
-    (p) => (p?._id || p)?.toString() !== currentUserId
-  );
-  const otherUserId = (otherParticipant?._id || otherParticipant)?.toString();
+  const [fetchedParticipant, setFetchedParticipant] = useState(null);
 
   useEffect(() => {
     const activeSocket = window.socket || getSocket();
@@ -115,6 +111,33 @@ const ChatWindow = () => {
       });
     }
   };
+
+  const otherParticipant = activeChat?.participants?.find(
+    (p) => {
+      const pId = (p?._id || p?.id || p)?.toString();
+      return pId && pId !== currentUserId;
+    }
+  );
+  const otherUserId = (otherParticipant?._id || otherParticipant)?.toString();
+  const requesterId = (activeChat?.requestedBy?._id || activeChat?.requestedBy)?.toString();
+
+  // Agar backend se requestedBy ya participant sirf ek ID ki tarah aaya hai, toh ye automatically API se details le aayega
+  useEffect(() => {
+    const fetchMissingProfile = async () => {
+      const targetId = requesterId || otherUserId;
+      if (targetId && typeof targetId === "string" && targetId.length === 24) {
+        try {
+          const { data } = await api.get(`/users/${targetId}`);
+          if (data?.success || data?.user || data?.fullName) {
+            setFetchedParticipant(data.user || data);
+          }
+        } catch (err) {
+          console.error("Could not fetch profile", err);
+        }
+      }
+    };
+    fetchMissingProfile();
+  }, [requesterId, otherUserId, activeChat?._id]);
 
   const fetchStreak = async () => {
     if (!activeChat || activeChat.isGroupChat || !otherUserId) return;
@@ -230,12 +253,27 @@ const ChatWindow = () => {
     : {};
 
   const isPending = activeChat.requestStatus === "pending";
-  const requesterId = (activeChat.requestedBy?._id || activeChat.requestedBy)?.toString();
   const requestedByMe = requesterId === currentUserId;
   const isReceiver = isPending && !requestedByMe;
 
-  const requesterProfile = activeChat.requestedBy?._id ? activeChat.requestedBy : otherParticipant;
+  const matchedParticipant = activeChat?.participants?.find(
+    (p) => {
+      const pId = (p?._id || p?.id || p)?.toString();
+      return pId && requesterId && pId === requesterId;
+    }
+  );
 
+  const requesterProfile = 
+    (typeof activeChat?.requestedBy === "object" && activeChat?.requestedBy !== null && activeChat.requestedBy.fullName)
+      ? activeChat.requestedBy
+      : (typeof fetchedParticipant === "object" && fetchedParticipant !== null && fetchedParticipant.fullName)
+      ? fetchedParticipant
+      : (typeof matchedParticipant === "object" && matchedParticipant !== null && matchedParticipant.fullName)
+      ? matchedParticipant
+      : (typeof otherParticipant === "object" && otherParticipant !== null && otherParticipant.fullName)
+      ? otherParticipant
+      : { fullName: "User", username: "user" };
+  
   const streakCount = Number(streakData?.streakCount || 0);
   const isStreakBroken = streakData?.status === "BROKEN";
   const streakRecoveriesLeft = Number(user?.streakRecoveriesLeft || (isVip ? 5 : 3));
@@ -247,7 +285,7 @@ const ChatWindow = () => {
         className="sticky top-0 z-50 w-full shrink-0 shadow-md cursor-default theme-panel-bg"
         onDoubleClick={handleSimulateScreenshot}
       >
-        <ChatHeader onOpenInfo={() => setShowInfoDrawer(true)} onStartCall={startCall} />
+        <ChatHeader chatUser={requesterProfile} onOpenInfo={() => setShowInfoDrawer(true)} onStartCall={startCall} />
 
         {/* Snap Streak Top Bar */}
         {!activeChat.isGroupChat && !activeChat.isSavedCloud && streakData && (
@@ -355,7 +393,8 @@ const ChatWindow = () => {
               <p className="text-xs font-medium theme-text">
                 Accept message request from{" "}
                 <strong className="text-sky-400 font-mono">
-                  @{requesterProfile?.username || "user"}
+                  {requesterProfile?.fullName || requesterProfile?.name || "User"} 
+                  (@{requesterProfile?.username || "user"})
                 </strong>
                 ?
               </p>
